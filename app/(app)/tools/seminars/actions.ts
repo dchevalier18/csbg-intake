@@ -1,6 +1,6 @@
 "use server";
 import { revalidatePath } from "next/cache";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db, t } from "@/db";
 import { requireUser } from "@/lib/auth";
 import { audit, userCanSeeProgram, userHasCap, visiblePrograms } from "@/lib/access";
@@ -81,6 +81,15 @@ export async function markAttendance(seminarId: string): Promise<ActionResult> {
     return { ok: false, message: "No attendees with client records yet — run quick intake first." };
   }
 
+  // double-post guard: one attendance posting per seminar
+  const note = `${sem.title} — seminar attendance.`;
+  const alreadyPosted = db.select().from(t.serviceLog)
+    .where(and(eq(t.serviceLog.date, sem.date), eq(t.serviceLog.programId, sem.programId), eq(t.serviceLog.note, note)))
+    .all().length > 0;
+  if (alreadyPosted) {
+    return { ok: false, message: "Attendance was already posted for this seminar." };
+  }
+
   for (const a of withClient) {
     db.insert(t.serviceLog).values({
       date: sem.date,
@@ -88,7 +97,7 @@ export async function markAttendance(seminarId: string): Promise<ActionResult> {
       code: sem.srvCode,
       programId: sem.programId,
       staffId: user.id,
-      note: `${sem.title} — seminar attendance.`,
+      note,
     }).run();
   }
 

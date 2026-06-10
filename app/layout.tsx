@@ -33,8 +33,10 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
-      <body className={`${din.variable} ${luster.variable} ${barlow.variable}`}>{children}</body>
+    // font variables must live on <html> — tokens.css composes them into
+    // --font-h1/--font-body at :root, which can't see body-level variables
+    <html lang="en" className={`${din.variable} ${luster.variable} ${barlow.variable}`}>
+      <body>{children}</body>
     </html>
   );
 }
