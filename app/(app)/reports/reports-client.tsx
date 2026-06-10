@@ -1,0 +1,141 @@
+"use client";
+/* Reports — CSBG Annual Report rollup preview (Module 3). Pixel port of
+   screens-reports.jsx; all data arrives pre-tallied from the server page. */
+import { useState } from "react";
+import { Chip, CodeChip, Kpi, Meter, PageHead, Panel } from "@/components/ui";
+import { Seg } from "@/components/ui-client";
+import { useToast } from "@/components/toast";
+import { I } from "@/components/icons";
+import { fmt } from "@/lib/format";
+import { fnpiStats, type MiniTableData, type ReportRollup } from "./types";
+
+function MiniTable({ title, code, rows, total }: MiniTableData) {
+  const max = Math.max(1, ...rows.map((r) => r.n));
+  return (
+    <Panel>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10 }}>
+        <h3 className="ptitle" style={{ fontSize: 15 }}>{title}</h3>
+        <CodeChip code={code} />
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {rows.map((r) => (
+          <div key={r.label} style={{ display: "grid", gridTemplateColumns: "1fr 60px 32px", gap: 10, alignItems: "center", fontSize: 12.5 }}>
+            <span style={{ color: "var(--calv-slate-65)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.label}</span>
+            <div className="track" style={{ height: 10, background: "var(--calv-sand-15)", borderRadius: 2, overflow: "hidden" }}>
+              <i style={{ display: "block", height: "100%", width: (r.n / max * 100) + "%", background: "var(--calv-teal)" }}></i>
+            </div>
+            <span style={{ fontFamily: "var(--font-h1)", fontSize: 13, textAlign: "right" }}>{r.n}</span>
+          </div>
+        ))}
+        <div style={{ display: "flex", justifyContent: "space-between", borderTop: "1px solid var(--calv-slate-15)", paddingTop: 7, marginTop: 3, fontSize: 12 }}>
+          <span style={{ color: "var(--calv-slate-65)" }}>TOTAL</span>
+          <span style={{ fontFamily: "var(--font-h1)", fontSize: 13 }}>{total}</span>
+        </div>
+      </div>
+    </Panel>
+  );
+}
+
+export function ReportsClient({ data }: { data: ReportRollup }) {
+  const toast = useToast();
+  const [tab, setTab] = useState("Characteristics");
+  const { fy, agency, clientCount: n, readyPct } = data;
+  const maxSrv = Math.max(1, ...data.srvByDomain.map((d) => d.count));
+
+  // real file downloads from the export route (CSV rollup / Annual Report packet)
+  const download = (url: string, msg: string) => {
+    const a = document.createElement("a");
+    a.href = url;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    toast(msg);
+  };
+
+  return (
+    <div>
+      <PageHead
+        title="The report writes"
+        titleAccent="itself."
+        lede={`Live ${fy.short} rollup in CSBG Annual Report 3.0 format (OMB 0970-0492) — exactly what gets submitted to DCED each fall.`}
+        right={
+          <div style={{ display: "flex", gap: 8 }}>
+            <button className="calv-btn calv-btn--quiet calv-btn--sm"
+              onClick={() => download("/reports/export", "CSV export generated.")}>Export CSV</button>
+            <button className="calv-btn calv-btn--primary calv-btn--sm"
+              onClick={() => download("/reports/export?packet=1", "Annual Report packet drafted — Module 3 Sections A, B & C.")}>
+              <I name="doc" size={13} /> Draft Annual Report
+            </button>
+          </div>
+        }
+      />
+
+      <div className="kpis">
+        <Kpi kick="Individuals served (unduplicated)" value={fmt(agency.individualsServed)} foot="Module 3 Sec. C, line A" />
+        <Kpi kick="Households served (unduplicated)" value={fmt(agency.householdsServed)} foot="Module 3 Sec. C, line B" accent="var(--calv-teal)" />
+        <Kpi kick="New enrollments this FY" value={fmt(agency.newThisFY)} accent="var(--calv-sage)" />
+        <Kpi kick="Records report-ready" value={readyPct + "%"} foot={(100 - readyPct) + "% have Unknown / Not Reported fields"} tone="bad" accent="var(--calv-amber)" />
+      </div>
+
+      <div className="toolbar">
+        <Seg options={["Characteristics", "Services", "Outcomes (FNPI)"]} value={tab} onChange={setTab} />
+        <span className="kbd-hint" style={{ marginLeft: "auto" }}>
+          {tab === "Characteristics" ? "Sec. C — tallied live from the " + n + " records in this system" :
+            tab === "Services" ? "Sec. A — unduplicated counts by service code" : "Sec. B — Individual & Family National Performance Indicators"}
+        </span>
+      </div>
+
+      {tab === "Characteristics" ? (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 13 }}>
+          {data.characteristics.map((m) => (
+            <MiniTable key={m.code} title={m.title} code={m.code} rows={m.rows} total={m.total} />
+          ))}
+        </div>
+      ) : null}
+
+      {tab === "Services" ? (
+        <Panel title="Module 3, Section A — services by domain" sub={`Unduplicated individuals served, ${fy.short} to date. Click a domain in the full product to drill to service-code level.`}>
+          <div className="bars-h" style={{ maxWidth: 760 }}>
+            {data.srvByDomain.map((d) => (
+              <div className="bar-h" key={d.domain} style={{ gridTemplateColumns: "220px 1fr 70px" }}>
+                <span style={{ display: "flex", gap: 8, alignItems: "center" }}>{d.name} <CodeChip code={d.code} /></span>
+                <div className="track" style={{ height: 18 }}><i style={{ width: (d.count / maxSrv * 100) + "%" }}></i></div>
+                <span className="v">{fmt(d.count)}</span>
+              </div>
+            ))}
+          </div>
+          <p style={{ fontSize: 12, color: "var(--calv-slate-65)", marginTop: 16 }}>
+            Top single services: {data.topServices.map((s) => `${s.code} ${s.label} (${fmt(s.count)})`).join(" · ")}.
+          </p>
+        </Panel>
+      ) : null}
+
+      {tab === "Outcomes (FNPI)" ? (
+        <Panel title="Module 3, Section B — Individual & Family NPIs" sub={`Actuals vs ${fy.short} targets. 'Achieving outcome' = actual ÷ number served; 'target accuracy' = actual ÷ target.`}>
+          <table className="data">
+            <thead><tr><th>Indicator</th><th className="num">Served</th><th className="num">Target</th><th className="num">Actual</th><th className="num">% achieving</th><th style={{ width: 170 }}>Target accuracy</th><th>Pace</th></tr></thead>
+            <tbody>
+              {data.fnpi.map((f) => {
+                const { achieving, accuracy, onPace } = fnpiStats(f, fy.pctElapsed);
+                return (
+                  <tr key={f.code}>
+                    <td><div style={{ display: "flex", gap: 8, alignItems: "center" }}><CodeChip code={f.code} /><span style={{ maxWidth: 330, display: "inline-block" }}>{f.label}</span></div></td>
+                    <td className="num">{fmt(f.served)}</td>
+                    <td className="num" style={{ color: "var(--calv-slate-65)" }}>{fmt(f.target)}</td>
+                    <td className="num">{fmt(f.actual)}</td>
+                    <td className="num">{achieving}%</td>
+                    <td><Meter pct={Math.min(accuracy, 100)} tone={onPace ? "" : "warn"} /></td>
+                    <td>{onPace ? <Chip tone="sage">On pace</Chip> : <Chip tone="amber">Behind</Chip>}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          <p style={{ fontSize: 12, color: "var(--calv-slate-65)", marginTop: 14 }}>
+            {fy.pctElapsed}% of the FY has elapsed — indicators under {fy.pctElapsed - 5}% of target are flagged so program managers can act before September 30, not after.
+          </p>
+        </Panel>
+      ) : null}
+    </div>
+  );
+}

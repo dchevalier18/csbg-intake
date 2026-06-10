@@ -1,0 +1,56 @@
+/* Reports vertical — plain serializable shapes shared by the server rollup,
+   the page/client UI, and the export route. No server imports here. */
+
+export interface MiniRow {
+  label: string;
+  n: number;
+}
+
+export interface MiniTableData {
+  title: string; // "C1 · Sex"
+  code: string;  // "Sec. C1"
+  rows: MiniRow[];
+  total: number;
+}
+
+export interface DomainBar {
+  domain: string; // domain id ("hn")
+  code: string;   // "SRV 5"
+  name: string;   // "Health and Nutrition"
+  count: number;
+}
+
+export interface TopService {
+  code: string;
+  label: string;
+  count: number;
+}
+
+export interface FnpiRow {
+  code: string;
+  label: string;
+  served: number;
+  target: number;
+  actual: number;
+}
+
+export interface ReportRollup {
+  fy: { label: string; short: string; range: string; pctElapsed: number };
+  orgName: string;
+  generated: string; // ISO date
+  agency: { individualsServed: number; householdsServed: number; newThisFY: number };
+  clientCount: number;
+  readyPct: number; // % of enrolled records at 100% completeness
+  characteristics: MiniTableData[];
+  srvByDomain: DomainBar[];
+  topServices: TopService[];
+  fnpi: FnpiRow[];
+}
+
+/** Derived FNPI metrics — single source of truth for the table, CSV, and packet.
+    'Achieving outcome' = actual ÷ number served; 'target accuracy' = actual ÷ target. */
+export function fnpiStats(f: FnpiRow, pctElapsed: number): { achieving: number; accuracy: number; onPace: boolean } {
+  const achieving = f.served > 0 ? Math.round((f.actual / f.served) * 100) : 0;
+  const accuracy = f.target > 0 ? Math.round((f.actual / f.target) * 100) : 0;
+  return { achieving, accuracy, onPace: accuracy >= pctElapsed - 5 };
+}

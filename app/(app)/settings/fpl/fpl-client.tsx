@@ -1,0 +1,152 @@
+"use client";
+import { useEffect, useState } from "react";
+import { Panel, Field, Chip } from "@/components/ui";
+import { I } from "@/components/icons";
+import { useToast } from "@/components/toast";
+import { money, longDate } from "@/lib/format";
+import { patchActiveFpl, setCsbgCeiling, publishFpl, makeFplActive } from "./actions";
+
+interface Sched {
+  year: number;
+  base: number;
+  perAdditional: number;
+  effective: string;
+  status: string;
+}
+
+const histDate = (iso: string) =>
+  new Date(iso + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+
+export function FplClient({ history, ceiling: ceilingProp, pinned }: {
+  history: Sched[]; ceiling: number; pinned: Record<number, number>;
+}) {
+  const toast = useToast();
+  const sorted = [...history].sort((a, b) => b.year - a.year);
+  const active = sorted.find((s) => s.status === "active") ?? sorted[0];
+
+  const [base, setBase] = useState(String(active?.base ?? 0));
+  const [per, setPer] = useState(String(active?.perAdditional ?? 0));
+  const [ceiling, setCeiling] = useState(ceilingProp);
+  const [showPublish, setShowPublish] = useState(false);
+  const [pYear, setPYear] = useState(String((active?.year ?? 2026) + 1));
+  const [pBase, setPBase] = useState(String(active?.base ?? 0));
+  const [pPer, setPPer] = useState(String(active?.perAdditional ?? 0));
+
+  useEffect(() => {
+    setBase(String(active?.base ?? 0));
+    setPer(String(active?.perAdditional ?? 0));
+    setPYear(String((active?.year ?? 2026) + 1));
+    setPBase(String(active?.base ?? 0));
+    setPPer(String(active?.perAdditional ?? 0));
+  }, [active?.year, active?.base, active?.perAdditional]);
+  useEffect(() => { setCeiling(ceilingProp); }, [ceilingProp]);
+
+  if (!active) return null;
+
+  const b = Number(base) || 0;
+  const p = Number(per) || 0;
+  const annualOf = (size: number) => b + p * (size - 1);
+  const sizes = [1, 2, 3, 4, 5, 6, 7, 8];
+
+  async function commitActive() {
+    if (!active) return;
+    const nb = Number(base) || 0;
+    const np = Number(per) || 0;
+    if (nb === active.base && np === active.perAdditional) return;
+    const res = await patchActiveFpl(nb, np);
+    if (!res.ok && res.message) toast(res.message);
+  }
+
+  async function onCeiling(v: number) {
+    setCeiling(v);
+    const res = await setCsbgCeiling(v);
+    if (!res.ok && res.message) toast(res.message);
+  }
+
+  async function onPublish() {
+    const res = await publishFpl(Number(pYear), Number(pBase), Number(pPer));
+    if (res.ok) setShowPublish(false);
+    if (res.message) toast(res.message);
+  }
+
+  async function onMakeActive(year: number) {
+    const res = await makeFplActive(year);
+    if (res.message) toast(res.message);
+  }
+
+  return (
+    <div>
+      <div className="row2" style={{ gridTemplateColumns: "1fr 1.15fr", alignItems: "start" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 13 }}>
+          <Panel title={"Active schedule · FPL " + active.year} sub="Used for every NEW assessment from today forward. Corrections here do not touch cases already assessed — they stay pinned to their stored schedule.">
+            <div className="fgrid c2">
+              <Field label="Household of 1 (annual $)"><input type="number" step="10" value={base} onChange={(e) => setBase(e.target.value)} onBlur={commitActive} /></Field>
+              <Field label="Each additional person (+$)"><input type="number" step="10" value={per} onChange={(e) => setPer(e.target.value)} onBlur={commitActive} /></Field>
+            </div>
+            <p style={{ fontSize: 11.5, color: "var(--calv-slate-65)", margin: "12px 0 0" }}>Effective {longDate(active.effective)} · 48 contiguous states — Alaska & Hawaii use separate tables.</p>
+          </Panel>
+          <Panel title="CSBG income ceiling" sub="Your state's eligibility limit as a percentage of FPL. Applied at assessment time against the schedule in force.">
+            <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
+              <div className="field" style={{ width: 150 }}>
+                <select value={ceiling} onChange={(e) => onCeiling(Number(e.target.value))}>{[100, 125, 150, 175, 200].map((pc) => <option key={pc} value={pc}>{pc}% FPL</option>)}</select>
+              </div>
+              <span style={{ fontSize: 12.5, color: "var(--calv-slate-65)" }}>A household of 3 currently qualifies up to <strong style={{ fontWeight: 600, color: "var(--calv-slate)" }}>{money(annualOf(3) * ceiling / 100)}/yr</strong>.</span>
+            </div>
+          </Panel>
+        </div>
+        <Panel title={"Preview · FPL " + active.year} sub={"Annual guideline by household size, with your " + ceiling + "% ceiling applied."}>
+          <table className="data">
+            <thead><tr><th>Household size</th><th className="num">100% FPL (annual)</th><th className="num">Monthly</th><th className="num">{ceiling}% ceiling</th></tr></thead>
+            <tbody>
+              {sizes.map((s) => (
+                <tr key={s}>
+                  <td className="cname">{s}</td>
+                  <td className="num">{money(annualOf(s))}</td>
+                  <td className="num" style={{ color: "var(--calv-slate-65)" }}>{money(annualOf(s) / 12)}</td>
+                  <td className="num" style={{ fontWeight: 600 }}>{money(annualOf(s) * ceiling / 100)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p style={{ fontSize: 11.5, color: "var(--calv-slate-65)", marginTop: 12 }}>For households over 8, add {money(p)} per additional person.</p>
+        </Panel>
+      </div>
+
+      <Panel title="Guideline history" sub="Every schedule ever configured stays on record. Enrolled and closed cases keep the schedule they were assessed under — publishing a new year never rewrites a prior eligibility determination."
+        right={<button className="calv-btn calv-btn--primary calv-btn--sm" onClick={() => setShowPublish((s) => !s)}><I name="plus" size={13} /> Publish new year</button>}>
+        {showPublish ? (
+          <div style={{ margin: "4px 0 18px", padding: "14px 16px", background: "var(--calv-sand-15)", border: "1px solid var(--calv-sand-35)", borderRadius: 4 }}>
+            <div className="calv-label" style={{ marginBottom: 10 }}>Publish a new guideline year</div>
+            <div style={{ display: "grid", gridTemplateColumns: "110px 1fr 1fr auto auto", gap: 12, alignItems: "end" }}>
+              <Field label="Year"><input type="number" value={pYear} onChange={(e) => setPYear(e.target.value)} /></Field>
+              <Field label="Household of 1 (annual $)"><input type="number" step="10" value={pBase} onChange={(e) => setPBase(e.target.value)} /></Field>
+              <Field label="Each additional person (+$)"><input type="number" step="10" value={pPer} onChange={(e) => setPPer(e.target.value)} /></Field>
+              <button className="calv-btn calv-btn--primary calv-btn--sm" onClick={onPublish}><I name="check" size={13} /> Publish & activate</button>
+              <button className="calv-btn calv-btn--quiet calv-btn--sm" onClick={() => setShowPublish(false)}>Cancel</button>
+            </div>
+            <p style={{ fontSize: 11.5, color: "var(--calv-slate-65)", margin: "10px 0 0" }}>The current schedule is archived automatically. New intakes assess against the new year; nothing already assessed is recalculated.</p>
+          </div>
+        ) : null}
+        <table className="data">
+          <thead><tr><th>Guideline year</th><th className="num">Household of 1</th><th className="num">Each additional</th><th>Effective</th><th>Status</th><th className="num">Cases pinned</th><th></th></tr></thead>
+          <tbody>
+            {sorted.map((s) => (
+              <tr key={s.year}>
+                <td className="cname">FPL {s.year}</td>
+                <td className="num">{money(s.base)}</td>
+                <td className="num">{money(s.perAdditional)}</td>
+                <td>{histDate(s.effective)}</td>
+                <td>{s.status === "active" ? <Chip tone="sage">Active</Chip> : <Chip>Archived</Chip>}</td>
+                <td className="num">{pinned[s.year] || "—"}</td>
+                <td style={{ textAlign: "right" }}>{s.status !== "active" ? <button className="calv-btn calv-btn--quiet calv-btn--sm" onClick={() => onMakeActive(s.year)}>Make active</button> : null}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <p style={{ fontSize: 12, color: "var(--calv-slate-65)", marginTop: 14, lineHeight: 1.55 }}>
+          <strong style={{ fontWeight: 600, color: "var(--calv-slate)" }}>How pinning works:</strong> every intake and eligibility determination stores the guideline year it was assessed against. Client profiles, the eligibility queue, and the D12 income-level report all calculate from the pinned schedule — so a case enrolled under FPL {active.year - 1} keeps its original determination even after FPL {active.year} goes live.
+        </p>
+      </Panel>
+    </div>
+  );
+}
