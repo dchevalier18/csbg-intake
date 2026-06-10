@@ -1,0 +1,229 @@
+import Database from "better-sqlite3";
+import { drizzle, type BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
+import path from "node:path";
+import fs from "node:fs";
+import * as schema from "./schema";
+import { runSeed } from "./seed";
+
+const DB_PATH = process.env.CSBG_DB_PATH || path.join(process.cwd(), "data", "csbg.db");
+
+const BOOTSTRAP = `
+CREATE TABLE IF NOT EXISTS organization (
+  id INTEGER PRIMARY KEY, name TEXT NOT NULL, short TEXT NOT NULL,
+  tagline TEXT NOT NULL DEFAULT '', region TEXT NOT NULL DEFAULT '',
+  accent TEXT NOT NULL DEFAULT '#D14124', logo_mode TEXT NOT NULL DEFAULT 'calv',
+  logo_data TEXT, fy_start TEXT NOT NULL DEFAULT 'October',
+  csbg_ceiling INTEGER NOT NULL DEFAULT 125
+);
+CREATE TABLE IF NOT EXISTS users (
+  id TEXT PRIMARY KEY, name TEXT NOT NULL, username TEXT NOT NULL UNIQUE,
+  password_hash TEXT NOT NULL, role TEXT NOT NULL,
+  access TEXT NOT NULL DEFAULT 'assigned', initials TEXT NOT NULL,
+  active INTEGER NOT NULL DEFAULT 1
+);
+CREATE TABLE IF NOT EXISTS user_programs (
+  user_id TEXT NOT NULL, program_id TEXT NOT NULL,
+  PRIMARY KEY (user_id, program_id)
+);
+CREATE TABLE IF NOT EXISTS sessions (
+  token TEXT PRIMARY KEY, user_id TEXT NOT NULL, expires_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS programs (
+  id TEXT PRIMARY KEY, name TEXT NOT NULL, short TEXT NOT NULL, color TEXT NOT NULL,
+  type TEXT NOT NULL, sources TEXT NOT NULL DEFAULT '[]',
+  sort INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1
+);
+CREATE TABLE IF NOT EXISTS doc_types (key TEXT PRIMARY KEY, label TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS program_docs (
+  program_id TEXT NOT NULL, doc_key TEXT NOT NULL,
+  PRIMARY KEY (program_id, doc_key)
+);
+CREATE TABLE IF NOT EXISTS clients (
+  id TEXT PRIMARY KEY, first TEXT NOT NULL, last TEXT NOT NULL, dob TEXT NOT NULL,
+  sex TEXT, race TEXT, edu TEXT, work TEXT, insurance TEXT, military TEXT,
+  disability INTEGER, phone TEXT, address TEXT, county TEXT, hh_type TEXT,
+  hh_size INTEGER NOT NULL DEFAULT 1, housing TEXT,
+  income INTEGER NOT NULL DEFAULT 0, income_src TEXT, caseworker_id TEXT,
+  enrolled TEXT NOT NULL, fpl_year INTEGER NOT NULL, next_follow_up TEXT,
+  flags TEXT NOT NULL DEFAULT '[]', custom TEXT NOT NULL DEFAULT '{}',
+  status TEXT NOT NULL DEFAULT 'active', created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS client_programs (
+  client_id TEXT NOT NULL, program_id TEXT NOT NULL,
+  PRIMARY KEY (client_id, program_id)
+);
+CREATE TABLE IF NOT EXISTS applications (
+  id TEXT PRIMARY KEY, first TEXT NOT NULL, last TEXT NOT NULL, dob TEXT NOT NULL,
+  phone TEXT, address TEXT, county TEXT, sex TEXT, race TEXT, edu TEXT, work TEXT,
+  insurance TEXT, military TEXT, disability INTEGER, hh_type TEXT,
+  hh_size INTEGER NOT NULL DEFAULT 1, housing TEXT,
+  income INTEGER NOT NULL DEFAULT 0, income_src TEXT,
+  custom TEXT NOT NULL DEFAULT '{}',
+  program_id TEXT NOT NULL, caseworker_id TEXT,
+  stage TEXT NOT NULL DEFAULT 'docs', applied TEXT NOT NULL,
+  fpl_year INTEGER NOT NULL, notes TEXT NOT NULL DEFAULT '',
+  decision_note TEXT, decided_by TEXT, decided_at TEXT, client_id TEXT,
+  portal_token TEXT UNIQUE
+);
+CREATE TABLE IF NOT EXISTS application_docs (
+  application_id TEXT NOT NULL, doc_key TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'missing', source TEXT, updated_at TEXT,
+  PRIMARY KEY (application_id, doc_key)
+);
+CREATE TABLE IF NOT EXISTS services (
+  code TEXT PRIMARY KEY, domain TEXT NOT NULL, label TEXT NOT NULL,
+  active INTEGER NOT NULL DEFAULT 1, sort INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS service_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT NOT NULL, client_id TEXT NOT NULL,
+  code TEXT NOT NULL, program_id TEXT NOT NULL, staff_id TEXT NOT NULL,
+  note TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS fpl_schedules (
+  year INTEGER PRIMARY KEY, base INTEGER NOT NULL, per_additional INTEGER NOT NULL,
+  effective TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'archived'
+);
+CREATE TABLE IF NOT EXISTS lists (key TEXT PRIMARY KEY, label TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS list_values (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, list_key TEXT NOT NULL,
+  value TEXT NOT NULL, sort INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS intake_fields (
+  id TEXT PRIMARY KEY, label TEXT NOT NULL, code TEXT NOT NULL DEFAULT '',
+  type TEXT NOT NULL, list_key TEXT, options_text TEXT,
+  enabled INTEGER NOT NULL DEFAULT 1, builtin INTEGER NOT NULL DEFAULT 0,
+  sort INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS fnpi_progress (
+  code TEXT PRIMARY KEY, label TEXT NOT NULL,
+  served INTEGER NOT NULL DEFAULT 0, target INTEGER NOT NULL DEFAULT 0,
+  actual INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS integrations (
+  id TEXT PRIMARY KEY, name TEXT NOT NULL, kind TEXT NOT NULL, status TEXT NOT NULL,
+  last_sync TEXT NOT NULL DEFAULT '', records TEXT NOT NULL DEFAULT '',
+  detail TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS audit_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, user_id TEXT,
+  action TEXT NOT NULL, entity TEXT NOT NULL, entity_id TEXT NOT NULL,
+  detail TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS classes (
+  id TEXT PRIMARY KEY, program_id TEXT NOT NULL, name TEXT NOT NULL,
+  site TEXT NOT NULL DEFAULT '', schedule TEXT NOT NULL DEFAULT '',
+  srv_code TEXT NOT NULL DEFAULT 'SRV 2h'
+);
+CREATE TABLE IF NOT EXISTS students (
+  id TEXT PRIMARY KEY, class_id TEXT NOT NULL, name TEXT NOT NULL, client_id TEXT,
+  grade TEXT NOT NULL DEFAULT '', school TEXT NOT NULL DEFAULT '',
+  term_pct INTEGER NOT NULL DEFAULT 100
+);
+CREATE TABLE IF NOT EXISTS class_sessions (
+  id TEXT PRIMARY KEY, class_id TEXT NOT NULL, date TEXT NOT NULL,
+  label TEXT NOT NULL, posted INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS attendance_marks (
+  session_id TEXT NOT NULL, student_id TEXT NOT NULL, mark TEXT,
+  PRIMARY KEY (session_id, student_id)
+);
+CREATE TABLE IF NOT EXISTS contractors (
+  id TEXT PRIMARY KEY, program_id TEXT NOT NULL, name TEXT NOT NULL,
+  trade TEXT NOT NULL DEFAULT '', crews INTEGER NOT NULL DEFAULT 1,
+  phone TEXT NOT NULL DEFAULT '', insurance_exp TEXT NOT NULL,
+  bpi_exp TEXT NOT NULL, epa_rrp_exp TEXT NOT NULL,
+  qc_pass INTEGER NOT NULL DEFAULT 100
+);
+CREATE TABLE IF NOT EXISTS wx_jobs (
+  id TEXT PRIMARY KEY, program_id TEXT NOT NULL, client_name TEXT NOT NULL,
+  client_id TEXT, address TEXT NOT NULL DEFAULT '',
+  stage TEXT NOT NULL DEFAULT 'audit', contractor_id TEXT,
+  funding TEXT NOT NULL DEFAULT '', measures TEXT NOT NULL DEFAULT '',
+  started TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS pantry_agencies (
+  id TEXT PRIMARY KEY, program_id TEXT NOT NULL, name TEXT NOT NULL,
+  town TEXT NOT NULL DEFAULT '', county TEXT NOT NULL DEFAULT '',
+  contact TEXT NOT NULL DEFAULT '', phone TEXT NOT NULL DEFAULT '',
+  compliance TEXT NOT NULL DEFAULT 'current'
+);
+CREATE TABLE IF NOT EXISTS pantry_reports (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, agency_id TEXT NOT NULL, month TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'missing', households INTEGER, lbs INTEGER
+);
+CREATE TABLE IF NOT EXISTS seminars (
+  id TEXT PRIMARY KEY, program_id TEXT NOT NULL, title TEXT NOT NULL,
+  date TEXT NOT NULL, time TEXT NOT NULL DEFAULT '', site TEXT NOT NULL DEFAULT '',
+  capacity INTEGER NOT NULL DEFAULT 0, registered INTEGER NOT NULL DEFAULT 0,
+  srv_code TEXT NOT NULL DEFAULT 'SRV 3a'
+);
+CREATE TABLE IF NOT EXISTS seminar_attendees (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, seminar_id TEXT NOT NULL, name TEXT NOT NULL,
+  client_id TEXT, application_id TEXT,
+  intake_status TEXT NOT NULL DEFAULT 'not-started'
+);
+CREATE TABLE IF NOT EXISTS projects (
+  id TEXT PRIMARY KEY, program_id TEXT NOT NULL, name TEXT NOT NULL,
+  town TEXT NOT NULL DEFAULT '', buyer TEXT NOT NULL DEFAULT '',
+  budget INTEGER NOT NULL DEFAULT 0, spent INTEGER NOT NULL DEFAULT 0,
+  pct INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS project_milestones (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT NOT NULL, label TEXT NOT NULL,
+  done INTEGER NOT NULL DEFAULT 0, current INTEGER NOT NULL DEFAULT 0,
+  sort INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS project_requirements (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT NOT NULL, label TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'current'
+);
+CREATE TABLE IF NOT EXISTS volunteers (
+  id TEXT PRIMARY KEY, name TEXT NOT NULL, client_id TEXT,
+  low_income INTEGER NOT NULL DEFAULT 0, role TEXT NOT NULL DEFAULT '',
+  hours_fy INTEGER NOT NULL DEFAULT 0, last_shift TEXT
+);
+CREATE TABLE IF NOT EXISTS volunteer_programs (
+  volunteer_id TEXT NOT NULL, program_id TEXT NOT NULL,
+  PRIMARY KEY (volunteer_id, program_id)
+);
+CREATE TABLE IF NOT EXISTS loans (
+  id TEXT PRIMARY KEY, program_id TEXT NOT NULL, borrower TEXT NOT NULL,
+  client_id TEXT, purpose TEXT NOT NULL DEFAULT '',
+  principal INTEGER NOT NULL DEFAULT 0, balance INTEGER NOT NULL DEFAULT 0,
+  rate TEXT NOT NULL DEFAULT '', term TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'current', next_due TEXT,
+  srv_code TEXT NOT NULL DEFAULT 'SRV 3b'
+);
+CREATE INDEX IF NOT EXISTS idx_service_log_client ON service_log (client_id);
+CREATE INDEX IF NOT EXISTS idx_service_log_program ON service_log (program_id);
+CREATE INDEX IF NOT EXISTS idx_client_programs_program ON client_programs (program_id);
+CREATE INDEX IF NOT EXISTS idx_applications_stage ON applications (stage);
+CREATE INDEX IF NOT EXISTS idx_audit_entity ON audit_log (entity, entity_id);
+`;
+
+type DB = BetterSQLite3Database<typeof schema>;
+
+declare global {
+  // eslint-disable-next-line no-var
+  var __csbgDb: DB | undefined;
+}
+
+function createDb(): DB {
+  fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
+  const sqlite = new Database(DB_PATH);
+  sqlite.pragma("journal_mode = WAL");
+  sqlite.pragma("foreign_keys = ON");
+  sqlite.exec(BOOTSTRAP);
+  const dbi = drizzle(sqlite, { schema });
+  // auto-seed an empty database so `npm run dev` works out of the box
+  const row = sqlite.prepare("SELECT COUNT(*) AS n FROM organization").get() as { n: number };
+  if (row.n === 0) runSeed(dbi);
+  return dbi;
+}
+
+// survive Next.js dev-mode hot reloads with a single connection
+export const db: DB = globalThis.__csbgDb ?? createDb();
+if (process.env.NODE_ENV !== "production") globalThis.__csbgDb = db;
+
+export * as t from "./schema";

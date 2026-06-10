@@ -1,0 +1,301 @@
+/* ============================================================
+   Community Action Lehigh Valley — Design Tokens & Type Styles
+   Ported from CALV brand standards (Fig Industries, Mar 2021).
+   Fonts are loaded via next/font and exposed as:
+     --font-din (DIN Condensed Bold), --font-barlow (DIN 2014 sub),
+     --font-luster (Luster Brush — youth programs only)
+   ============================================================ */
+
+:root {
+  /* ---------- PRIMARY PALETTE ---------- */
+  --calv-red:    #D14124; /* PMS 7597 C — signature action red */
+  --calv-slate:  #54585A; /* PMS 425 C  — body + secondary UI */
+  --calv-teal:   #006269; /* PMS 7715 C — secondary accent, links, data */
+
+  /* ---------- SUPPORTING PALETTE ---------- */
+  --calv-sage:   #6FA287; /* PMS 556 C  — success / nature / housing */
+  --calv-amber:  #F1B434; /* PMS 143 C  — warning / youth accents */
+  --calv-sand:   #D5CB9F; /* PMS 4545 C — muted backgrounds, callouts */
+
+  /* ---------- NEUTRALS ---------- */
+  --calv-white:  #FFFFFF;
+  --calv-black:  #000000;
+
+  /* ---------- DERIVED TINTS (65% / 35% / 15% over white) ---------- */
+  --calv-red-65:   #DD7461;
+  --calv-red-35:   #EEAB9E;
+  --calv-red-15:   #F8DDD6;
+  --calv-slate-65: #898C8D;
+  --calv-slate-35: #B8B9BA;
+  --calv-slate-15: #E1E2E2;
+  --calv-teal-65:  #598E93;
+  --calv-teal-35:  #9EBDC0;
+  --calv-teal-15:  #D5E0E1;
+  --calv-sage-65:  #9EC1B0;
+  --calv-sage-35:  #C9DDD3;
+  --calv-sage-15:  #ECF3EE;
+  --calv-amber-65: #F6CB75;
+  --calv-amber-35: #FAE3B3;
+  --calv-amber-15: #FDF4DD;
+  --calv-sand-65:  #E2DBBF;
+  --calv-sand-35:  #EFECDC;
+  --calv-sand-15:  #F8F6EE;
+
+  /* ---------- SEMANTIC ALIASES ---------- */
+  --color-bg:           var(--calv-white);
+  --color-surface:      var(--calv-white);
+  --color-surface-warm: var(--calv-sand-15);
+  --color-text:         var(--calv-slate);
+  --color-text-soft:    var(--calv-slate-65);
+  --color-text-invert:  var(--calv-white);
+  --color-accent:       var(--calv-red);
+  --color-accent-press: #B73719;
+  --color-link:         var(--calv-teal);
+  --color-success:      var(--calv-sage);
+  --color-warning:      var(--calv-amber);
+  --color-muted:        var(--calv-sand);
+  --color-border:       var(--calv-slate-35);
+  --color-border-soft:  var(--calv-slate-15);
+  --color-focus-ring:   var(--calv-red);
+
+  /* ---------- TYPOGRAPHY FAMILIES ---------- */
+  --font-h1:   var(--font-din), "Oswald", "Barlow Condensed", sans-serif;
+  --font-h2:   "Anton", "Oswald", sans-serif;
+  --font-h3:   var(--font-luster), "Caveat Brush", "Permanent Marker", cursive;
+  --font-sub:  var(--font-din), "Oswald", "Barlow Condensed", sans-serif;
+  --font-body: var(--font-barlow), "Inter", "Helvetica Neue", Arial, sans-serif;
+  --font-editorial: "Playfair Display", Georgia, serif;
+
+  /* ---------- TRACKING / LEADING ---------- */
+  --tracking-tight:   -0.120em;
+  --tracking-default:  0em;
+  --tracking-wide:     0.020em;
+
+  --leading-display: 1.00;
+  --leading-h3:      0.88;
+  --leading-sub:     1.15;
+  --leading-body:    1.55;
+
+  /* ---------- TYPE SCALE ---------- */
+  --text-h1-xl: 88px;
+  --text-h1:    64px;
+  --text-h1-sm: 44px;
+  --text-h2:    72px;
+  --text-h3:    56px;
+  --text-sub:   20px;
+  --text-sub-sm: 14px;
+  --text-lead:  14px;
+  --text-body:  16px;
+  --text-body-lg: 18px;
+  --text-small: 13px;
+
+  /* ---------- SPACING / RADIUS ---------- */
+  --radius-xs: 2px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-pill: 999px;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+
+  /* ---------- ELEVATION ---------- */
+  --shadow-sm: 0 1px 2px rgba(84, 88, 90, 0.08);
+  --shadow-md: 0 4px 10px rgba(84, 88, 90, 0.10);
+  --shadow-lg: 0 12px 28px rgba(84, 88, 90, 0.14);
+  --shadow-focus: 0 0 0 3px var(--calv-red-35);
+}
+
+/* ============================================================
+   TYPE STYLES
+   ============================================================ */
+
+.calv-h1 {
+  font-family: var(--font-h1);
+  font-weight: 700;
+  font-size: var(--text-h1);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+  line-height: var(--leading-display);
+  color: var(--calv-red);
+  margin: 0;
+}
+.calv-h1--xl { font-size: var(--text-h1-xl); }
+.calv-h1--sm { font-size: var(--text-h1-sm); }
+.calv-h1--slate { color: var(--calv-slate); }
+.calv-h1--white { color: var(--calv-white); }
+
+.calv-h3 {
+  /* Youth programs ONLY (Generation Next, Sixth Street kids) */
+  font-family: var(--font-h3);
+  font-weight: 400;
+  font-size: var(--text-h3);
+  text-transform: lowercase;
+  letter-spacing: var(--tracking-tight);
+  line-height: var(--leading-h3);
+  color: var(--calv-slate);
+  margin: 0;
+}
+
+.calv-subhead {
+  font-family: var(--font-sub);
+  font-weight: 700;
+  font-size: var(--text-sub);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+  line-height: var(--leading-sub);
+  color: var(--calv-slate);
+  margin: 0;
+}
+.calv-subhead--sm { font-size: var(--text-sub-sm); }
+
+.calv-body {
+  font-family: var(--font-body);
+  font-weight: 300;
+  font-size: var(--text-body);
+  line-height: var(--leading-body);
+  color: var(--calv-slate);
+  margin: 0;
+}
+.calv-body--lg { font-size: var(--text-body-lg); }
+.calv-body--sm { font-size: var(--text-small); }
+
+.calv-lead-in {
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: var(--text-lead);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+  color: var(--calv-slate);
+  margin: 0;
+}
+
+.calv-link {
+  color: var(--calv-teal);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1.5px;
+}
+.calv-link:hover { color: var(--calv-red); }
+
+/* ============================================================
+   COMPONENTS
+   ============================================================ */
+
+.calv-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  font-family: var(--font-sub);
+  font-weight: 700;
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+  padding: 14px 24px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: filter .15s ease, transform .05s ease, background .15s ease;
+  min-height: 44px;
+}
+.calv-btn:active { transform: translateY(1px); }
+.calv-btn:focus-visible { outline: 3px solid var(--calv-red-35); outline-offset: 2px; }
+.calv-btn:disabled { opacity: .45; cursor: not-allowed; }
+
+.calv-btn--primary   { background: var(--calv-red); color: var(--calv-white); }
+.calv-btn--primary:hover   { background: var(--color-accent-press); }
+
+.calv-btn--secondary { background: var(--calv-teal); color: var(--calv-white); }
+.calv-btn--secondary:hover { filter: brightness(0.93); }
+
+.calv-btn--ghost {
+  background: transparent;
+  color: var(--calv-red);
+  border: 2px solid var(--calv-red);
+  padding: 12px 22px;
+}
+.calv-btn--ghost:hover { background: var(--calv-red); color: var(--calv-white); }
+
+.calv-btn--quiet {
+  background: var(--calv-slate-15);
+  color: var(--calv-slate);
+}
+.calv-btn--quiet:hover { background: var(--calv-slate-35); }
+
+.calv-btn--lg { padding: 18px 32px; font-size: 16px; min-height: 52px; }
+.calv-btn--sm { padding: 8px 14px; font-size: 12px; min-height: 32px; }
+
+.calv-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-sub);
+  font-weight: 700;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+  padding: 4px 10px;
+  border-radius: var(--radius-pill);
+  background: var(--calv-slate-15);
+  color: var(--calv-slate);
+}
+.calv-badge--red   { background: var(--calv-red-15);   color: var(--calv-red); }
+.calv-badge--teal  { background: var(--calv-teal-15);  color: var(--calv-teal); }
+.calv-badge--sage  { background: var(--calv-sage-15);  color: #2F5A41; }
+.calv-badge--amber { background: var(--calv-amber-15); color: #8A6410; }
+
+.calv-input {
+  font-family: var(--font-body);
+  font-size: var(--text-body);
+  color: var(--calv-slate);
+  background: var(--calv-white);
+  border: 1.5px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  line-height: 1.3;
+  width: 100%;
+  box-sizing: border-box;
+  transition: border-color .15s;
+}
+.calv-input:focus {
+  outline: none;
+  border-color: var(--calv-red);
+  box-shadow: var(--shadow-focus);
+}
+.calv-input::placeholder { color: var(--calv-slate-65); }
+
+.calv-label {
+  font-family: var(--font-sub);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+  color: var(--calv-slate);
+  display: block;
+  margin-bottom: 6px;
+}
+
+.calv-card {
+  background: var(--calv-white);
+  border: 1px solid var(--color-border-soft);
+  border-radius: var(--radius-sm);
+  padding: var(--space-6);
+  box-shadow: var(--shadow-sm);
+}
+.calv-card--warm { background: var(--color-surface-warm); border-color: var(--calv-sand-35); }
+
+.calv-tagline {
+  font-family: var(--font-sub);
+  font-weight: 700;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--calv-red);
+}
