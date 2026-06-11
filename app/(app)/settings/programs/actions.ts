@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 import { db, t } from "@/db";
 import { requireAdmin } from "@/lib/auth";
 import { audit } from "@/lib/access";
+import { openApplications } from "@/lib/data/core";
 import { DATA_SOURCES, PROGRAM_COLORS, PROGRAM_TYPES, programType } from "@/lib/program-types";
 
 export interface ActionResult {
@@ -81,8 +82,21 @@ export async function removeProgram(id: string): Promise<ActionResult> {
   const existing = db.select().from(t.programs).where(eq(t.programs.id, id)).get();
   if (!existing || existing.active !== 1) return { ok: false, message: "That program no longer exists." };
 
-  // Soft delete — history (enrollments, services, applications) stays attributed.
+  // open applications would become invisible and undecidable once the program
+  // disappears from everyone's scope — make staff decide them first
+  const openApps = openApplications([id]);
+  if (openApps.length > 0) {
+    return {
+      ok: false,
+      message: `${existing.name} still has ${openApps.length} open application${openApps.length === 1 ? "" : "s"} in the eligibility queue — approve or deny ${openApps.length === 1 ? "it" : "them"} before removing the program.`,
+    };
+  }
+
+  // Soft delete — history (enrollments, services, decided applications) stays
+  // attributed. Stale user assignments are cleaned up so a later program with a
+  // recycled id can't inherit access grants.
   db.update(t.programs).set({ active: 0 }).where(eq(t.programs.id, id)).run();
+  db.delete(t.userPrograms).where(eq(t.userPrograms.programId, id)).run();
   audit(user.id, "program.remove", "program", id, existing.name);
   revalidatePath("/", "layout");
   return { ok: true, message: `Removed “${existing.name}”. Tools no longer used by any program were hidden.` };

@@ -83,8 +83,10 @@ export function applicationDocList(app: Application): AppDoc[] {
 }
 
 export function applicationDocsVerified(app: Application): boolean {
-  const docs = applicationDocList(app);
-  return docs.length > 0 && docs.every((d) => d.status === "verified");
+  // vacuous truth: a program with no configured document requirements is
+  // documents-satisfied — otherwise applications to admin-created programs
+  // (which start with zero required docs) could never be approved
+  return applicationDocList(app).every((d) => d.status === "verified");
 }
 
 // ---------- applications ----------
@@ -122,4 +124,10 @@ export function nextApplicationId(): string {
 export function kvGet<T>(key: string, fallback: T): T {
   const row = db.select().from(t.kv).where(eq(t.kv.key, key)).get();
   return row ? (row.value as T) : fallback;
+}
+
+export function kvSet(key: string, value: unknown): void {
+  const existing = db.select().from(t.kv).where(eq(t.kv.key, key)).get();
+  if (existing) db.update(t.kv).set({ value }).where(eq(t.kv.key, key)).run();
+  else db.insert(t.kv).values({ key, value }).run();
 }

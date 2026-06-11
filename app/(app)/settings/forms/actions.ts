@@ -96,11 +96,13 @@ export async function addIntakeField(
 
 export async function updateListValue(id: number, value: string): Promise<ActionResult> {
   const admin = await requireAdmin();
+  const v = value.trim();
+  if (!v) return { ok: false, message: "Value can't be empty — remove it instead if it's no longer needed." };
   const row = db.select().from(t.listValues).where(eq(t.listValues.id, id)).get();
   if (!row) return { ok: false, message: "Value not found." };
-  if (row.value === value) return { ok: true };
-  db.update(t.listValues).set({ value }).where(eq(t.listValues.id, id)).run();
-  audit(admin.id, "forms.list.update", "list_value", String(id), `${row.listKey}: “${row.value}” → “${value}”`);
+  if (row.value === v) return { ok: true };
+  db.update(t.listValues).set({ value: v }).where(eq(t.listValues.id, id)).run();
+  audit(admin.id, "forms.list.update", "list_value", String(id), `${row.listKey}: “${row.value}” → “${v}”`);
   revalidateForms();
   return { ok: true };
 }

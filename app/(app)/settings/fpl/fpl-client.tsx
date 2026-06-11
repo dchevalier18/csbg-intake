@@ -54,7 +54,12 @@ export function FplClient({ history, ceiling: ceilingProp, pinned }: {
     const np = Number(per) || 0;
     if (nb === active.base && np === active.perAdditional) return;
     const res = await patchActiveFpl(nb, np);
-    if (!res.ok && res.message) toast(res.message);
+    if (!res.ok) {
+      if (res.message) toast(res.message);
+      // revert the rejected edit so the inputs show the real schedule
+      setBase(String(active.base));
+      setPer(String(active.perAdditional));
+    }
   }
 
   async function onCeiling(v: number) {
@@ -78,7 +83,7 @@ export function FplClient({ history, ceiling: ceilingProp, pinned }: {
     <div>
       <div className="row2" style={{ gridTemplateColumns: "1fr 1.15fr", alignItems: "start" }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 13 }}>
-          <Panel title={"Active schedule · FPL " + active.year} sub="Used for every NEW assessment from today forward. Corrections here do not touch cases already assessed — they stay pinned to their stored schedule.">
+          <Panel title={"Active schedule · FPL " + active.year} sub="Used for every NEW assessment from today forward. Once any case is assessed under this year its amounts lock — publish a corrected guideline year for changes, so prior determinations are never rewritten.">
             <div className="fgrid c2">
               <Field label="Household of 1 (annual $)"><input type="number" step="10" value={base} onChange={(e) => setBase(e.target.value)} onBlur={commitActive} /></Field>
               <Field label="Each additional person (+$)"><input type="number" step="10" value={per} onChange={(e) => setPer(e.target.value)} onBlur={commitActive} /></Field>

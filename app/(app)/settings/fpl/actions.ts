@@ -13,7 +13,10 @@ export interface ActionResult {
   message?: string;
 }
 
-/** Patch the ACTIVE schedule in place (corrections). Pinned cases are untouched. */
+/** Patch the ACTIVE schedule in place — allowed ONLY while no case is pinned to it.
+    Pinning is by year, so an in-place edit would silently re-derive every
+    determination already assessed under this year. Once cases are pinned,
+    corrections must go through "Publish new year" instead. */
 export async function patchActiveFpl(base: number, perAdditional: number): Promise<ActionResult> {
   const admin = await requireAdmin();
   const b = Math.round(Number(base));
@@ -22,10 +25,28 @@ export async function patchActiveFpl(base: number, perAdditional: number): Promi
     return { ok: false, message: "Enter valid guideline amounts." };
   }
   const active = getActiveFpl();
+  const pinnedCount = casesPinnedTo(active.year);
+  if (pinnedCount > 0) {
+    return {
+      ok: false,
+      message: `${pinnedCount} case${pinnedCount === 1 ? " is" : "s are"} already assessed under FPL ${active.year} — editing it in place would rewrite their determinations. Publish a corrected guideline year instead.`,
+    };
+  }
   db.update(t.fplSchedules).set({ base: b, perAdditional: p }).where(eq(t.fplSchedules.year, active.year)).run();
   audit(admin.id, "fpl.update", "fpl", String(active.year), `FPL ${active.year}: household of 1 $${b}, each additional $${p}`);
   revalidatePath("/", "layout");
   return { ok: true };
+}
+
+/** Cases pinned to a guideline year: enrolled clients + OPEN applications.
+    (Approved applications are excluded — they live on as the created client.) */
+function casesPinnedTo(year: number): number {
+  const clients = db.select({ fplYear: t.clients.fplYear }).from(t.clients).all()
+    .filter((c) => c.fplYear === year).length;
+  const openApps = db.select({ fplYear: t.applications.fplYear, stage: t.applications.stage })
+    .from(t.applications).all()
+    .filter((a) => a.fplYear === year && (OPEN_STAGES as readonly string[]).includes(a.stage)).length;
+  return clients + openApps;
 }
 
 export async function setCsbgCeiling(ceiling: number): Promise<ActionResult> {

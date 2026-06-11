@@ -36,11 +36,10 @@ function revalidateQueue(): void {
 export async function setApplicationDoc(appId: string, docKey: string, status: string): Promise<ActionResult> {
   const user = await requireUser();
   const app = loadApp(appId);
-  if (!app || !(OPEN_STAGES as readonly string[]).includes(app.stage)) {
+  // access check FIRST, same message as not-found — out-of-scope callers must not
+  // be able to distinguish existence or stage of applications they can't see
+  if (!app || !userCanSeeProgram(user, app.programId) || !(OPEN_STAGES as readonly string[]).includes(app.stage)) {
     return { ok: false, message: "Application not found or already decided." };
-  }
-  if (!userCanSeeProgram(user, app.programId)) {
-    return { ok: false, message: "No access to this application's program." };
   }
   if (status !== "submitted" && status !== "verified") {
     return { ok: false, message: "Invalid document status." };
@@ -81,11 +80,8 @@ export async function setApplicationDoc(appId: string, docKey: string, status: s
 export async function sendForDecision(appId: string): Promise<ActionResult> {
   const user = await requireUser();
   const app = loadApp(appId);
-  if (!app || app.stage !== "review") {
+  if (!app || !userCanSeeProgram(user, app.programId) || app.stage !== "review") {
     return { ok: false, message: "Application isn't ready for decision." };
-  }
-  if (!userCanSeeProgram(user, app.programId)) {
-    return { ok: false, message: "No access to this application's program." };
   }
   db.update(t.applications).set({ stage: "decision" }).where(eq(t.applications.id, app.id)).run();
   audit(user.id, "application.advance", "application", app.id, "Sent to program manager for decision");
@@ -97,11 +93,8 @@ export async function sendForDecision(appId: string): Promise<ActionResult> {
 export async function denyApplication(appId: string, note: string): Promise<ActionResult> {
   const user = await requireUser();
   const app = loadApp(appId);
-  if (!app || !(OPEN_STAGES as readonly string[]).includes(app.stage)) {
+  if (!app || !userCanSeeProgram(user, app.programId) || !(OPEN_STAGES as readonly string[]).includes(app.stage)) {
     return { ok: false, message: "Application not found or already decided." };
-  }
-  if (!userCanSeeProgram(user, app.programId)) {
-    return { ok: false, message: "No access to this application's program." };
   }
   const trimmed = note.trim();
   if (trimmed.length < 8) {
@@ -122,11 +115,8 @@ export async function denyApplication(appId: string, note: string): Promise<Acti
 export async function approveApplication(appId: string): Promise<ActionResult> {
   const user = await requireUser();
   const app = loadApp(appId);
-  if (!app || !(OPEN_STAGES as readonly string[]).includes(app.stage)) {
+  if (!app || !userCanSeeProgram(user, app.programId) || !(OPEN_STAGES as readonly string[]).includes(app.stage)) {
     return { ok: false, message: "Application not found or already decided." };
-  }
-  if (!userCanSeeProgram(user, app.programId)) {
-    return { ok: false, message: "No access to this application's program." };
   }
   // Server-side re-check — never trust the client's disabled button.
   if (!applicationDocsVerified(app)) {
@@ -187,7 +177,14 @@ export async function approveApplication(appId: string): Promise<ActionResult> {
       staffId: user.id,
       note: "Eligibility determination — approved & enrolled.",
     }).run();
+    // close the seminar → intake → enroll loop: the attendee now has a client
+    // record, so posted seminar attendance produces their service entry
+    tx.update(t.seminarAttendees)
+      .set({ clientId, intakeStatus: "enrolled" })
+      .where(eq(t.seminarAttendees.applicationId, app.id))
+      .run();
   });
+  revalidatePath("/tools/seminars");
 
   audit(user.id, "application.approve", "application", app.id, `Approved & enrolled as ${clientId} (${st.pct}% FPL, ${app.fplYear} schedule)`);
   revalidateQueue();

@@ -41,7 +41,8 @@ const DOC_STATUS: Record<string, string> = {
 const NEXT: Record<string, string> = { missing: "submitted", submitted: "verified", verified: "verified" };
 
 const stageOf = (a: AppRow) => STAGES.find((s) => s.id === a.stage) ?? STAGES[0];
-const docsDone = (a: AppRow) => a.docs.length > 0 && a.docs.every((d) => d.status === "verified");
+// vacuous truth — zero configured requirements counts as documents-satisfied
+const docsDone = (a: AppRow) => a.docs.every((d) => d.status === "verified");
 
 export default function EligibilityClient({ rows, ceiling }: { rows: AppRow[]; ceiling: number }) {
   const toast = useToast();

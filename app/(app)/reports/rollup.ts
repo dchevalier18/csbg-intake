@@ -78,15 +78,42 @@ export function buildRollup(): ReportRollup {
   ];
 
   // ---------- Section A — services by domain ----------
-  const srvByDomain = kvGet<Array<{ domain: string; count: number }>>("srvByDomain", [])
-    .flatMap((d) => {
-      const dom = domainById(d.domain);
-      return dom ? [{ domain: d.domain, code: dom.code, name: dom.name, count: d.count }] : [];
-    });
+  // The kv aggregates are the imported pre-system baseline (CAP60/legacy history);
+  // everything recorded in THIS system's service log is layered on top live, so
+  // "Service logged — mapped to <code> for the rollup" is actually true.
+  const allServices = db.select().from(t.services).all();
+  const domainOf = new Map(allServices.map((s) => [s.code, s.domain]));
+  const fyLog = db.select().from(t.serviceLog).all()
+    .filter((s) => s.date >= fy.start && s.date <= fy.end);
+  const liveByDomain = new Map<string, number>();
+  const liveByCode = new Map<string, number>();
+  for (const s of fyLog) {
+    const dom = domainOf.get(s.code);
+    if (dom) liveByDomain.set(dom, (liveByDomain.get(dom) ?? 0) + 1);
+    liveByCode.set(s.code, (liveByCode.get(s.code) ?? 0) + 1);
+  }
 
-  const serviceLabels = new Map(db.select().from(t.services).all().map((s) => [s.code, s.label]));
-  const topServices = kvGet<Array<{ code: string; count: number }>>("topServices", [])
-    .map((s) => ({ code: s.code, label: shortServiceLabel(serviceLabels.get(s.code) ?? s.code), count: s.count }));
+  const baseline = new Map(kvGet<Array<{ domain: string; count: number }>>("srvByDomain", [])
+    .map((d) => [d.domain, d.count]));
+  const srvByDomain = [...new Set([...baseline.keys(), ...liveByDomain.keys()])]
+    .flatMap((id) => {
+      const dom = domainById(id);
+      const count = (baseline.get(id) ?? 0) + (liveByDomain.get(id) ?? 0);
+      return dom && count > 0 ? [{ domain: id, code: dom.code, name: dom.name, count }] : [];
+    })
+    .sort((a, b) => b.count - a.count);
+
+  const serviceLabels = new Map(allServices.map((s) => [s.code, s.label]));
+  const topBaseline = new Map(kvGet<Array<{ code: string; count: number }>>("topServices", [])
+    .map((s) => [s.code, s.count]));
+  const topServices = [...new Set([...topBaseline.keys(), ...liveByCode.keys()])]
+    .map((code) => ({
+      code,
+      label: shortServiceLabel(serviceLabels.get(code) ?? code),
+      count: (topBaseline.get(code) ?? 0) + (liveByCode.get(code) ?? 0),
+    }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 3);
 
   // ---------- Section B — Individual & Family NPIs ----------
   const fnpi = db.select().from(t.fnpiProgress)

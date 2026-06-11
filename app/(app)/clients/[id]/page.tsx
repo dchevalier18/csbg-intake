@@ -1,7 +1,7 @@
 import { eq, desc } from "drizzle-orm";
 import { db, t } from "@/db";
 import { requireUser } from "@/lib/auth";
-import { visibleClient, getPrograms } from "@/lib/access";
+import { visibleClient, visibleProgramIds, getPrograms } from "@/lib/access";
 import { getOrg, getEnabledIntakeFields, listValuesFor } from "@/lib/data/core";
 import { fplStatusFor } from "@/lib/fpl";
 import { completenessItems } from "@/lib/completeness";
@@ -78,11 +78,14 @@ export default async function ClientProfilePage({ params }: { params: Promise<{ 
     };
   });
 
+  // service history is scoped to the viewer's assigned programs — a multi-program
+  // client must not leak entries from programs the viewer can't see
+  const viewerPrograms = visibleProgramIds(user);
   const services = db.select().from(t.serviceLog)
     .where(eq(t.serviceLog.clientId, c.id))
     .orderBy(desc(t.serviceLog.date), desc(t.serviceLog.id))
     .all()
-    .filter((s) => s.date >= fy.start && s.date <= fy.end)
+    .filter((s) => viewerPrograms.has(s.programId) && s.date >= fy.start && s.date <= fy.end)
     .map((s) => ({
       id: s.id,
       code: s.code,

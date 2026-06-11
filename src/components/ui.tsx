@@ -17,7 +17,8 @@ export function ProgramDot({ color, label }: { color: string; label: string }) {
 }
 
 export function Meter({ pct, tone }: { pct: number; tone?: "" | "warn" | "bad" }) {
-  const cls = tone ?? (pct >= 90 ? "" : pct >= 70 ? "warn" : "bad");
+  // `||` not `??` — an empty-string tone falls through to pct-graded coloring
+  const cls = tone || (pct >= 90 ? "" : pct >= 70 ? "warn" : "bad");
   return (
     <div className="meter-row">
       <div className={"meter " + cls} style={{ flex: 1 }}><i style={{ width: pct + "%" }} /></div>

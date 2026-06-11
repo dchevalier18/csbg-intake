@@ -1,10 +1,11 @@
 "use server";
 /* Weatherization server actions — every mutation re-checks auth + program scoping. */
 import { revalidatePath } from "next/cache";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db, t } from "@/db";
 import { requireUser } from "@/lib/auth";
 import { audit, userCanSeeProgram, userHasCap } from "@/lib/access";
+import { kvGet, kvSet } from "@/lib/data/core";
 import { todayIso } from "@/lib/format";
 
 interface Result { ok: boolean; message: string }
@@ -32,6 +33,14 @@ export async function advanceJob(jobId: string): Promise<Result> {
 
   let message = `${job.id} advanced to ${STAGE_LABEL[next]}.`;
   if (next === "complete") {
+    // every completed unit rolls into FNPI 4f (households improved energy efficiency)
+    db.update(t.fnpiProgress)
+      .set({ served: sql`${t.fnpiProgress.served} + 1`, actual: sql`${t.fnpiProgress.actual} + 1` })
+      .where(eq(t.fnpiProgress.code, "FNPI 4f"))
+      .run();
+    const wxStats = kvGet<{ unitsCompletedFY: number; avgDaysAuditToQc: number }>("wxStats", { unitsCompletedFY: 0, avgDaysAuditToQc: 0 });
+    kvSet("wxStats", { ...wxStats, unitsCompletedFY: wxStats.unitsCompletedFY + 1 });
+    revalidatePath("/reports");
     if (job.clientId) {
       db.insert(t.serviceLog).values({
         date: todayIso(),
@@ -42,9 +51,9 @@ export async function advanceJob(jobId: string): Promise<Result> {
         note: `Weatherization job ${job.id} complete — ${job.measures}`,
       }).run();
       revalidatePath("/services");
-      message = `${job.id} complete — SRV 4g logged for ${job.clientName}.`;
+      message = `${job.id} complete — SRV 4g logged for ${job.clientName}, FNPI 4f updated.`;
     } else {
-      message = `${job.id} complete.`;
+      message = `${job.id} complete — FNPI 4f updated.`;
     }
   }
   audit(user.id, "wx.job.advance", "wx_job", jobId, `${STAGE_LABEL[job.stage]} → ${STAGE_LABEL[next]}`);

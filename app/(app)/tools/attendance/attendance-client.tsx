@@ -46,16 +46,11 @@ export function AttendanceClient({ programName, cls, students, sessions, todaySe
     return marks[studentId]?.[sessionId] ?? null;
   }
 
-  // Term % = present / (present + absent) — excused and unmarked count nothing;
-  // falls back to the stored term percentage when a student has no P/A data yet.
+  // Term % is the student's whole-term attendance record (stored on the roster) —
+  // NOT recomputed from the handful of sessions displayed here, which would
+  // misreport the metric this tool exists to flag (students under the 85% target).
   function termFor(st: Student): number {
-    let p = 0, a = 0;
-    for (const sess of sessions) {
-      const v = markFor(st.id, sess.id);
-      if (v === "p") p++;
-      else if (v === "a") a++;
-    }
-    return p + a > 0 ? Math.round((100 * p) / (p + a)) : st.termPct;
+    return st.termPct;
   }
 
   function cycle(studentId: string) {

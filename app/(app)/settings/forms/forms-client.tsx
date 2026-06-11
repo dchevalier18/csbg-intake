@@ -125,7 +125,7 @@ export function FormsClient({ fields, lists }: { fields: FRow[]; lists: LRow[] }
                 <div className="calv-label" style={{ marginBottom: 10 }}>{selList.label} — {selList.values.length} values</div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 7, maxWidth: 560 }}>
                   {selList.values.map((v) => (
-                    <ValueRow key={v.id} id={v.id} value={v.value} onRemove={onRemoveValue} />
+                    <ValueRow key={v.id} id={v.id} value={v.value} onRemove={onRemoveValue} onError={toast} />
                   ))}
                   <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 4 }}>
                     <div className="field" style={{ flex: 1 }}><input value={newVal} onChange={(e) => setNewVal(e.target.value)} placeholder="Add a value…" onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); onAddValue(); } }} /></div>
@@ -187,16 +187,25 @@ function FieldRow({ fd, listLabel, onSelectList, onRemove }: {
   );
 }
 
-function ValueRow({ id, value, onRemove }: {
+function ValueRow({ id, value, onRemove, onError }: {
   id: number;
   value: string;
   onRemove: (id: number) => void;
+  onError?: (msg: string) => void;
 }) {
   const [v, setV] = useState(value);
   useEffect(() => { setV(value); }, [value]);
+  async function commit() {
+    if (v === value) return;
+    const res = await updateListValue(id, v);
+    if (!res.ok) {
+      if (res.message && onError) onError(res.message);
+      setV(value); // rejected (e.g. blank) — restore the stored value
+    }
+  }
   return (
     <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-      <div className="field" style={{ flex: 1 }}><input value={v} onChange={(e) => setV(e.target.value)} onBlur={() => { if (v !== value) updateListValue(id, v); }} /></div>
+      <div className="field" style={{ flex: 1 }}><input value={v} onChange={(e) => setV(e.target.value)} onBlur={commit} /></div>
       <button className="calv-btn calv-btn--quiet calv-btn--sm" onClick={() => onRemove(id)} title="Remove value"><I name="x" size={13} /></button>
     </div>
   );

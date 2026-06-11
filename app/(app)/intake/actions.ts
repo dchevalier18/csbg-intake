@@ -6,27 +6,44 @@ import { redirect } from "next/navigation";
 import { eq } from "drizzle-orm";
 import { db, t } from "@/db";
 import { requireUser } from "@/lib/auth";
-import { audit, userCanSeeProgram } from "@/lib/access";
+import { audit, userCanSeeProgram, visibleProgramIds } from "@/lib/access";
 import { getEnabledIntakeFields, getOrg, nextApplicationId, requiredDocKeys } from "@/lib/data/core";
 import { getActiveFpl, fplStatusFor } from "@/lib/fpl";
 import { todayIso } from "@/lib/format";
 
-export interface DupMatch { id: string; first: string; last: string; dob: string }
+export interface DupMatch { id: string; first: string; last: string; dob: string; inScope: boolean }
 
-/** Live duplicate scan — deliberately UNSCOPED: duplicate prevention is agency-wide,
-    since duplicates split service history and inflate unduplicated counts. */
+/** Live duplicate scan. MATCHING is agency-wide (duplicates split service history and
+    inflate unduplicated counts), but identifying details are only returned for records
+    within the caller's assigned programs — out-of-scope matches come back redacted. */
 export async function checkDuplicates(first: string, last: string, dob: string): Promise<DupMatch[]> {
-  await requireUser();
+  const user = await requireUser();
   if (first.trim().length < 2 || last.trim().length < 2) return [];
   const firstPrefix = first.trim().toLowerCase().slice(0, 3);
   const lastLower = last.trim().toLowerCase();
+
+  const memberships = db.select().from(t.clientPrograms).all();
+  const byClient = new Map<string, string[]>();
+  for (const m of memberships) {
+    const arr = byClient.get(m.clientId) ?? [];
+    arr.push(m.programId);
+    byClient.set(m.clientId, arr);
+  }
+  const mine = visibleProgramIds(user);
+
   return db
     .select({ id: t.clients.id, first: t.clients.first, last: t.clients.last, dob: t.clients.dob })
     .from(t.clients)
     .all()
     .filter((c) =>
       c.last.toLowerCase() === lastLower &&
-      (c.first.toLowerCase().startsWith(firstPrefix) || c.dob === dob));
+      (c.first.toLowerCase().startsWith(firstPrefix) || c.dob === dob))
+    .map((c) => {
+      const inScope = (byClient.get(c.id) ?? []).some((p) => mine.has(p));
+      return inScope
+        ? { ...c, inScope }
+        : { id: "•••", first: "Existing", last: "record", dob: "•••", inScope };
+    });
 }
 
 export interface IntakePayload {
@@ -85,6 +102,9 @@ export async function submitIntake(payload: IntakePayload): Promise<{ ok: false;
 
   const id = nextApplicationId();
   const portalToken = crypto.randomBytes(8).toString("hex"); // 16 hex chars
+  // programs with no document requirements skip straight to review —
+  // there is nothing to collect, so the docs stage would be a dead end
+  const reqDocs = requiredDocKeys(payload.programId);
   db.insert(t.applications).values({
     id,
     first: payload.first.trim(),
@@ -108,7 +128,7 @@ export async function submitIntake(payload: IntakePayload): Promise<{ ok: false;
     custom,
     programId: payload.programId,
     caseworkerId: user.id,
-    stage: "docs",
+    stage: reqDocs.length > 0 ? "docs" : "review",
     applied: todayIso(),
     fplYear: active.year,
     notes: "New intake by " + user.name + ". " +
@@ -120,7 +140,7 @@ export async function submitIntake(payload: IntakePayload): Promise<{ ok: false;
 
   // required-document checklist — missing docs don't block intake
   const now = new Date().toISOString();
-  for (const docKey of requiredDocKeys(payload.programId)) {
+  for (const docKey of reqDocs) {
     db.insert(t.applicationDocs).values({
       applicationId: id,
       docKey,

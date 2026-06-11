@@ -39,6 +39,7 @@ export async function createSession(userId: string): Promise<void> {
   jar.set(COOKIE, token, {
     httpOnly: true,
     sameSite: "lax",
+    secure: process.env.NODE_ENV === "production" && process.env.CSBG_ALLOW_HTTP !== "1",
     path: "/",
     maxAge: SESSION_DAYS * 86400,
   });

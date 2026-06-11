@@ -73,9 +73,14 @@ export function IntakeClient({ lists, fields, programs, requiredDocs, docTypes, 
   const filled = metricFields.filter(([k]) => String(f[k] || "").trim() !== "").length;
   const completeness = Math.round((filled / metricFields.length) * 100);
 
-  const annualFor = (size: number) => fpl.base + fpl.perAdditional * (Math.max(1, size) - 1);
+  // mirror the server's normalization exactly (intake actions clamp hhSize to
+  // [1,12] and round income) so the preview can never disagree with the stored
+  // determination
+  const normSize = (s: string | number) => Math.min(12, Math.max(1, Math.round(Number(s) || 1)));
+  const normIncome = (i: string | number) => Math.max(0, Math.round(Number(i) || 0));
+  const annualFor = (size: string | number) => fpl.base + fpl.perAdditional * (normSize(size) - 1);
   const fplPct = f.income !== "" && Number(f.hhSize)
-    ? Math.round((Number(f.income) / annualFor(Number(f.hhSize))) * 100)
+    ? Math.round((normIncome(f.income) / annualFor(f.hhSize)) * 100)
     : null;
   const st = fplPct !== null
     ? (fplPct <= ceiling
@@ -153,7 +158,10 @@ export function IntakeClient({ lists, fields, programs, requiredDocs, docTypes, 
                 <div style={{ gridColumn: "span 2", background: "var(--calv-amber-15)", border: "1px solid var(--calv-amber-35)", borderRadius: 4, padding: "12px 14px", display: "flex", gap: 10, alignItems: "flex-start", fontSize: 12.5 }}>
                   <I name="alert" size={16} style={{ color: "#8A6410", marginTop: 1 }} />
                   <div>
-                    <strong style={{ fontWeight: 600 }}>Possible duplicate found.</strong> {dupes.map((d) => d.first + " " + d.last + " (" + d.id + ", DOB " + d.dob + ")").join("; ")} already exists.
+                    <strong style={{ fontWeight: 600 }}>Possible duplicate found.</strong>{" "}
+                    {dupes.filter((d) => d.inScope).map((d) => `${d.first} ${d.last} (${d.id}, DOB ${d.dob})`).join("; ")}
+                    {dupes.some((d) => d.inScope) ? " already exists. " : ""}
+                    {dupes.some((d) => !d.inScope) ? `${dupes.filter((d) => !d.inScope).length} matching record${dupes.filter((d) => !d.inScope).length === 1 ? "" : "s"} exist${dupes.filter((d) => !d.inScope).length === 1 ? "s" : ""} in a program outside your assignments — ask an administrator before creating a new one. ` : ""}
                     Open the existing record instead of creating a new one — duplicates split service history and inflate unduplicated counts.
                   </div>
                 </div>
@@ -183,7 +191,7 @@ export function IntakeClient({ lists, fields, programs, requiredDocs, docTypes, 
                 <div style={{ gridColumn: "span 2", borderRadius: 4, padding: "16px 18px", border: "1px solid", display: "flex", gap: 16, alignItems: "center", background: st.eligible ? "var(--calv-sage-15)" : "var(--calv-red-15)", borderColor: st.eligible ? "var(--calv-sage-35)" : "var(--calv-red-35)" }}>
                   <span style={{ fontFamily: "var(--font-h1)", fontSize: 40, lineHeight: 1, color: st.eligible ? "#2F5A41" : "var(--calv-red)" }}>{fplPct}%</span>
                   <div style={{ fontSize: 13, lineHeight: 1.5 }}>
-                    <strong style={{ fontWeight: 600 }}>of the Federal Poverty Level</strong> — household of {f.hhSize}, {fpl.year} guideline {money(annualFor(Number(f.hhSize)))}/yr.<br />
+                    <strong style={{ fontWeight: 600 }}>of the Federal Poverty Level</strong> — household of {normSize(f.hhSize)}, {fpl.year} guideline {money(annualFor(f.hhSize))}/yr.<br />
                     {st.eligible ? "Within the CSBG " + ceiling + "% eligibility ceiling." : "Above the CSBG " + ceiling + "% ceiling — intake can continue, but enrollment will require denial + referral or another funding source."}
                     <span style={{ color: "var(--calv-slate-65)" }}> Band: {FPL_BANDS[fplBand(fplPct)]} (D12 — auto-recorded).</span>
                   </div>
