@@ -7,9 +7,32 @@ import { Modal, Seg } from "@/components/ui-client";
 import { useToast } from "@/components/toast";
 import { I } from "@/components/icons";
 import { DOMAINS, FNPIS } from "@/lib/csbg-catalog";
-import { scheduleFollowUp, captureFields, recordOutcome } from "./actions";
+import { scheduleFollowUp, captureFields, recordOutcome, enrollInProgram } from "./actions";
 import { addServiceEntry } from "../../services/actions";
 import { servicesForProgram, fileToBase64, UPLOAD_ACCEPT, type ServiceOption } from "../../services/services-client";
+
+export interface EnrollTarget {
+  id: string;
+  name: string;
+  short: string;
+  color: string;
+  ceiling: number;          // % of FPL this program checks against
+  eligible: boolean;        // preview under the active schedule
+  pct: number;              // client's income as % of FPL
+  docsCount: number;
+}
+
+export interface PendingEnrollment {
+  id: string;               // application id
+  programShort: string;
+  stage: string;            // 'docs' | 'review' | 'decision'
+}
+
+const STAGE_LABEL: Record<string, string> = {
+  docs: "waiting on documents",
+  review: "ready for review",
+  decision: "awaiting decision",
+};
 
 export interface GapField {
   id: string;
@@ -41,7 +64,7 @@ export interface OutcomeRow {
 const OUTCOME_STATUS_OPTIONS = ["Achieved", "Working toward"];
 const fnpiDomains = DOMAINS.filter((d) => FNPIS.some((f) => f.domain === d.id));
 
-export function ClientProfile({ client, status, programs, completeness, characteristics, gaps, services, serviceOptions, restrictions, outcomes, outcomePrograms, followUp }: {
+export function ClientProfile({ client, status, programs, completeness, characteristics, gaps, services, serviceOptions, restrictions, outcomes, outcomePrograms, enrollTargets, pendingEnrollments, followUp }: {
   client: { id: string; first: string; last: string; enrolledLong: string; address: string; phone: string | null };
   status: { tone: string; label: string; eligible: boolean; guidelines: string };
   programs: { color: string; short: string }[];
@@ -53,6 +76,8 @@ export function ClientProfile({ client, status, programs, completeness, characte
   restrictions: Record<string, string[]>;
   outcomes: OutcomeRow[];
   outcomePrograms: { id: string; short: string }[];
+  enrollTargets: EnrollTarget[];
+  pendingEnrollments: PendingEnrollment[];
   followUp: { dueSub?: string; body: string; defaultDate: string };
 }) {
   const toast = useToast();
@@ -61,6 +86,8 @@ export function ClientProfile({ client, status, programs, completeness, characte
   const [showCapture, setShowCapture] = useState(false);
   const [showOutcome, setShowOutcome] = useState(false);
   const [showLog, setShowLog] = useState(false);
+  const [showEnroll, setShowEnroll] = useState(false);
+  const [enrollPick, setEnrollPick] = useState("");
   const [viewService, setViewService] = useState<ServiceRow | null>(null);
   const [date, setDate] = useState(followUp.defaultDate);
   const [vals, setVals] = useState<Record<string, string>>({});
@@ -88,6 +115,17 @@ export function ClientProfile({ client, status, programs, completeness, characte
       const res = await captureFields(client.id, vals);
       toast(res.message);
       if (res.ok) { setShowCapture(false); setVals({}); }
+    });
+  };
+
+  const submitEnroll = () => {
+    startTransition(async () => {
+      const res = await enrollInProgram(client.id, enrollPick);
+      toast(res.message);
+      if (res.ok) {
+        setShowEnroll(false);
+        setEnrollPick("");
+      }
     });
   };
 
@@ -153,6 +191,15 @@ export function ClientProfile({ client, status, programs, completeness, characte
         <Chip tone={status.tone}>{status.label} · {status.eligible ? "CSBG eligible" : "Over income ceiling"}</Chip>
         <Chip outline>{status.guidelines}</Chip>
         {programs.map((p) => <Chip key={p.short} outline><ProgramDot color={p.color} label={p.short} /></Chip>)}
+        {pendingEnrollments.map((p) => (
+          <Chip key={p.id} tone="amber" outline>{p.programShort} · in queue ({STAGE_LABEL[p.stage] ?? p.stage})</Chip>
+        ))}
+        {enrollTargets.length > 0 ? (
+          <button className="chip outline" style={{ cursor: "pointer", borderStyle: "dashed" }} onClick={() => setShowEnroll(true)}
+            title="Enroll this client in another program — no duplicate record">
+            <I name="plus" size={11} /> Enroll in program
+          </button>
+        ) : null}
         <Chip outline><I name="phone" size={12} /> {client.phone}</Chip>
         <Chip tone={completeness === 100 ? "sage" : "amber"}>{completeness}% report-ready</Chip>
       </div>
@@ -268,6 +315,63 @@ export function ClientProfile({ client, status, programs, completeness, characte
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 18 }}>
             <button className="calv-btn calv-btn--quiet calv-btn--sm" onClick={() => setShowCapture(false)}>Cancel</button>
             <button className="calv-btn calv-btn--primary calv-btn--sm" disabled={pending} onClick={submitCapture}>Save to record</button>
+          </div>
+        </Modal>
+      ) : null}
+
+      {showEnroll ? (
+        <Modal title={`Enroll ${client.first} in another program`} width={560} onClose={() => setShowEnroll(false)}>
+          <p style={{ fontSize: 12.5, color: "var(--calv-slate-65)", margin: "0 0 14px", lineHeight: 1.55 }}>
+            This creates a pre-filled application in the program&rsquo;s eligibility queue, linked to {client.id}.
+            The program&rsquo;s document checklist and income ceiling still apply — verified documents on file carry
+            over where requirements overlap. Approval adds the program to this record; <strong style={{ fontWeight: 600 }}>no duplicate client is created</strong>.
+          </p>
+          {pendingEnrollments.length > 0 ? (
+            <div style={{ background: "var(--calv-amber-15)", border: "1px solid var(--calv-amber-35)", borderRadius: 4, padding: "9px 12px", fontSize: 12.5, marginBottom: 14 }}>
+              Already in the queue: {pendingEnrollments.map((p) => `${p.programShort} (${p.id} — ${STAGE_LABEL[p.stage] ?? p.stage})`).join(" · ")}
+            </div>
+          ) : null}
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {enrollTargets.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => setEnrollPick(p.id)}
+                style={{
+                  display: "flex", gap: 10, alignItems: "center", textAlign: "left", padding: "11px 13px",
+                  borderRadius: 4, cursor: "pointer", background: "#fff", font: "inherit",
+                  border: enrollPick === p.id ? "2px solid var(--brand)" : "1px solid var(--calv-slate-15)",
+                }}
+              >
+                <ProgramDot color={p.color} label="" />
+                <span style={{ fontWeight: 600, fontSize: 13.5 }}>{p.name}</span>
+                <span style={{ marginLeft: "auto", display: "flex", gap: 7, alignItems: "center" }}>
+                  <Chip tone={p.eligible ? "sage" : "red"}>
+                    {p.eligible ? `Eligible · ${p.pct}% of ${p.ceiling}% FPL` : `Over ${p.ceiling}% FPL ceiling`}
+                  </Chip>
+                  <span style={{ fontSize: 11.5, color: "var(--calv-slate-65)", whiteSpace: "nowrap" }}>
+                    {p.docsCount === 0 ? "no documents" : `${p.docsCount} document${p.docsCount === 1 ? "" : "s"}`}
+                  </span>
+                </span>
+              </button>
+            ))}
+          </div>
+          {enrollPick && !enrollTargets.find((p) => p.id === enrollPick)?.eligible ? (
+            <p style={{ fontSize: 12, color: "var(--calv-slate-65)", margin: "12px 0 0" }}>
+              Income currently previews over this program&rsquo;s ceiling — the application can still enter the queue
+              (circumstances and corrections happen there), but approval stays blocked while income exceeds the ceiling.
+            </p>
+          ) : null}
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 18 }}>
+            <button className="calv-btn calv-btn--quiet calv-btn--sm" onClick={() => setShowEnroll(false)}>Cancel</button>
+            <button
+              className="calv-btn calv-btn--primary calv-btn--sm"
+              disabled={!enrollPick || pending}
+              style={!enrollPick || pending ? { opacity: 0.45, cursor: "not-allowed" } : undefined}
+              onClick={submitEnroll}
+            >
+              <I name="arrow" size={13} /> Create application
+            </button>
           </div>
         </Modal>
       ) : null}
