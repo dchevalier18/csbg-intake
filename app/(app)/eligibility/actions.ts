@@ -452,7 +452,10 @@ export async function reopenApplication(appId: string, programId: string, note: 
   };
 }
 
-/** Approve & enroll — creates the client record, pins the FPL year, logs SDA 1a. */
+/** Approve & enroll — creates the client record, pins the FPL year, logs SDA 1a.
+    Cross-enrollment applications (client_id set at creation by the profile's
+    "Enroll in program" action) add the program to the EXISTING client record
+    instead — one client id, one service history, no duplicate. */
 export async function approveApplication(appId: string): Promise<ActionResult> {
   const user = await requireUser();
   const app = await loadApp(appId);
@@ -469,9 +472,58 @@ export async function approveApplication(appId: string): Promise<ActionResult> {
     return { ok: false, message: `Income exceeds this program's ${ceiling}% FPL ceiling — approval is blocked; deny with referral, or reassign to a program with a higher ceiling.` };
   }
 
-  const clientId = await nextClientId();
   const today = todayIso();
   const now = new Date().toISOString();
+
+  // ---- linked application → enroll the existing client in the program ----
+  if (app.clientId) {
+    const existing = (await db.select().from(t.clients).where(eq(t.clients.id, app.clientId)))[0];
+    if (!existing) {
+      return { ok: false, message: `This application is linked to client ${app.clientId}, which no longer exists — deny it and run a fresh intake.` };
+    }
+    const already = (await db.select().from(t.clientPrograms)
+      .where(eq(t.clientPrograms.clientId, existing.id)))
+      .some((m) => m.programId === app.programId);
+
+    await db.transaction(async (tx) => {
+      if (!already) {
+        await tx.insert(t.clientPrograms).values({ clientId: existing.id, programId: app.programId });
+      }
+      await tx.update(t.applications).set({
+        stage: "approved",
+        decidedBy: user.id,
+        decidedAt: now,
+      }).where(eq(t.applications.id, app.id));
+      await tx.insert(t.serviceLog).values({
+        date: today,
+        clientId: existing.id,
+        code: "SDA 1a",
+        programId: app.programId,
+        staffId: user.id,
+        note: "Eligibility determination — approved; program added to existing record.",
+      });
+      await tx.update(t.seminarAttendees)
+        .set({ clientId: existing.id, intakeStatus: "enrolled" })
+        .where(eq(t.seminarAttendees.applicationId, app.id))
+        ;
+    });
+    revalidatePath("/tools/seminars");
+    revalidatePath(`/clients/${existing.id}`);
+
+    const program = await getProgram(app.programId);
+    await audit(user.id, "application.approve", "application", app.id,
+      `Approved — ${app.programId} added to existing client ${existing.id} (${st.pct}% FPL, ${app.fplYear} schedule)`);
+    revalidateQueue();
+    return {
+      ok: true,
+      message: already
+        ? `Approved — ${existing.first} was already enrolled in ${program?.short ?? app.programId}; the determination and SDA 1a entry were logged.`
+        : `Approved — ${program?.short ?? app.programId} added to ${existing.first} ${existing.last}'s existing record (${existing.id}), SDA 1a eligibility determination logged.`,
+    };
+  }
+
+  // ---- fresh intake → create the client record ----
+  const clientId = await nextClientId();
 
   await db.transaction(async (tx) => {
     await tx.insert(t.clients).values({

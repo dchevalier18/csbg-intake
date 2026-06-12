@@ -1,9 +1,9 @@
 import { eq, desc, asc } from "drizzle-orm";
 import { db, t } from "@/db";
 import { requireUser } from "@/lib/auth";
-import { visibleClient, visibleProgramIds, getPrograms } from "@/lib/access";
-import { getOrg, getEnabledIntakeFields, listValuesFor, programServiceRestrictions } from "@/lib/data/core";
-import { fplStatusFor } from "@/lib/fpl";
+import { visibleClient, visibleProgramIds, visiblePrograms, getPrograms } from "@/lib/access";
+import { getOrg, getEnabledIntakeFields, listValuesFor, programServiceRestrictions, programCeiling, requiredDocKeys, OPEN_STAGES } from "@/lib/data/core";
+import { fplStatusFor, getActiveFpl } from "@/lib/fpl";
 import { completenessItems } from "@/lib/completeness";
 import { fnpiByCode, serviceByCode } from "@/lib/csbg-catalog";
 import { ageFromDob, currentFY, longDate, money, shortDate, todayIso } from "@/lib/format";
@@ -125,6 +125,34 @@ export default async function ClientProfilePage({ params }: { params: Promise<{ 
 
   const restrictions = await programServiceRestrictions();
 
+  // Cross-enrollment: open applications already linked to this client (pending
+  // determinations), and candidate programs — visible to the viewer, not already
+  // enrolled, not already in the queue — each with a live eligibility preview
+  // under the ACTIVE schedule (a new determination always re-pins).
+  const openLinked = (await db.select().from(t.applications)
+    .where(eq(t.applications.clientId, c.id)))
+    .filter((a) => (OPEN_STAGES as readonly string[]).includes(a.stage));
+  const pendingEnrollments = openLinked.map((a) => ({
+    id: a.id,
+    programShort: allPrograms.get(a.programId)?.short ?? a.programId,
+    stage: a.stage,
+  }));
+  const pendingProgramIds = new Set(openLinked.map((a) => a.programId));
+  const activeFpl = c.status === "active" ? await getActiveFpl() : null;
+  const enrollTargets = activeFpl === null ? [] : await Promise.all(
+    (await visiblePrograms(user))
+      .filter((p) => !c.programIds.includes(p.id) && !pendingProgramIds.has(p.id))
+      .map(async (p) => {
+        const ceiling = await programCeiling(p.id);
+        const est = await fplStatusFor(c.income, c.hhSize, activeFpl.year, ceiling);
+        return {
+          id: p.id, name: p.name, short: p.short, color: p.color,
+          ceiling, eligible: est.eligible, pct: est.pct,
+          docsCount: (await requiredDocKeys(p.id)).length,
+        };
+      }),
+  );
+
   return (
     <ClientProfile
       client={{
@@ -150,6 +178,8 @@ export default async function ClientProfilePage({ params }: { params: Promise<{ 
       restrictions={restrictions}
       outcomes={outcomes}
       outcomePrograms={outcomePrograms}
+      enrollTargets={enrollTargets}
+      pendingEnrollments={pendingEnrollments}
       followUp={{
         dueSub: c.nextFollowUp ? `Due ${longDate(c.nextFollowUp)}` : undefined,
         body: c.flags[0] || "Quarterly case-plan review — verify outcome progress and update FNPI actuals.",
