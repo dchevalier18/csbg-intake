@@ -237,13 +237,15 @@ function ProgramAvailability({ services, domains, programs, restrictions, toast 
       </div>
 
       {limited ? (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px 24px", alignItems: "start" }}>
+        // minmax(0,1fr): grid columns must be allowed to shrink below the nowrap
+        // label width, or the whole page scrolls horizontally
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: "4px 24px", alignItems: "start" }}>
           {domains.map((d) => {
             const group = services.filter((s) => s.domain === d.id);
             if (group.length === 0) return null;
             const onCount = group.filter((s) => checked.has(s.code)).length;
             return (
-              <div key={d.id} style={{ marginBottom: 10 }}>
+              <div key={d.id} style={{ marginBottom: 10, minWidth: 0 }}>
                 <div style={{ display: "flex", gap: 8, alignItems: "baseline", padding: "6px 0", borderBottom: "1px solid var(--calv-slate-15)" }}>
                   <span style={{
                     fontFamily: "var(--font-sub)", fontSize: 10.5, fontWeight: 700, letterSpacing: ".04em",
