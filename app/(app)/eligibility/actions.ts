@@ -9,7 +9,7 @@ import { db, t } from "@/db";
 import type { Application, User } from "@/db/schema";
 import { requireUser } from "@/lib/auth";
 import { userCanSeeProgram, audit } from "@/lib/access";
-import { getOrg, requiredDocKeys, applicationDocsVerified, OPEN_STAGES, nextClientId } from "@/lib/data/core";
+import { requiredDocKeys, applicationDocsVerified, programCeiling, OPEN_STAGES, nextClientId } from "@/lib/data/core";
 import { fplStatusFor } from "@/lib/fpl";
 import { todayIso } from "@/lib/format";
 
@@ -261,10 +261,10 @@ export async function approveApplication(appId: string): Promise<ActionResult> {
   if (!await applicationDocsVerified(app)) {
     return { ok: false, message: "Approval unlocks when every document is verified." };
   }
-  const org = await getOrg();
-  const st = await fplStatusFor(app.income, app.hhSize, app.fplYear, org.csbgCeiling);
+  const ceiling = await programCeiling(app.programId);
+  const st = await fplStatusFor(app.income, app.hhSize, app.fplYear, ceiling);
   if (!st.eligible) {
-    return { ok: false, message: `Income exceeds the CSBG ${org.csbgCeiling}% FPL ceiling — approval is blocked; deny with referral.` };
+    return { ok: false, message: `Income exceeds this program's ${ceiling}% FPL ceiling — approval is blocked; deny with referral, or reassign to a program with a higher ceiling.` };
   }
 
   const clientId = await nextClientId();

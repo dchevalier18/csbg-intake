@@ -15,6 +15,7 @@ export interface ProgramCard {
   color: string;
   type: string;
   sources: string[];
+  fplCeiling: number | null;   // % of FPL; null = agency default
   docs: string[];
   enrolled: number;
 }
@@ -35,7 +36,12 @@ const shortDocLabel = (label: string): string => label.replace(/\s*\(.*\)\s*$/, 
 // CSBG eligibility baseline — pre-checked for new programs, admin can uncheck
 const DEFAULT_DOC_KEYS = ["id", "income", "residency"];
 
-export function ProgramsSettingsClient({ programs, docTypes }: { programs: ProgramCard[]; docTypes: DocTypeOption[] }) {
+// same options the agency-wide ceiling offers (Settings → FPL)
+const CEILING_OPTIONS = [100, 125, 150, 175, 200];
+
+export function ProgramsSettingsClient({ programs, docTypes, defaultCeiling }: {
+  programs: ProgramCard[]; docTypes: DocTypeOption[]; defaultCeiling: number;
+}) {
   const toast = useToast();
   const [editing, setEditing] = useState<ProgramCard | "new" | null>(null);
 
@@ -78,6 +84,14 @@ export function ProgramsSettingsClient({ programs, docTypes }: { programs: Progr
                   </div>
                 </div>
                 <div style={{ marginTop: 12 }}>
+                  <div style={KICK}>Income eligibility ceiling</div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    {p.fplCeiling !== null
+                      ? <Chip tone="amber">{p.fplCeiling}% FPL — program-specific</Chip>
+                      : <Chip outline>{defaultCeiling}% FPL — agency default</Chip>}
+                  </div>
+                </div>
+                <div style={{ marginTop: 12 }}>
                   <div style={KICK}>Required documents</div>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                     {p.docs.length
@@ -106,6 +120,7 @@ export function ProgramsSettingsClient({ programs, docTypes }: { programs: Progr
         <ProgramEditor
           program={editing === "new" ? null : editing}
           docTypes={docTypes}
+          defaultCeiling={defaultCeiling}
           onClose={() => setEditing(null)}
           toast={toast}
         />
@@ -114,9 +129,10 @@ export function ProgramsSettingsClient({ programs, docTypes }: { programs: Progr
   );
 }
 
-function ProgramEditor({ program, docTypes, onClose, toast }: {
+function ProgramEditor({ program, docTypes, defaultCeiling, onClose, toast }: {
   program: ProgramCard | null;
   docTypes: DocTypeOption[];
+  defaultCeiling: number;
   onClose: () => void;
   toast: (msg: string) => void;
 }) {
@@ -130,6 +146,7 @@ function ProgramEditor({ program, docTypes, onClose, toast }: {
   const [docs, setDocs] = useState<string[]>(
     program ? program.docs.slice() : DEFAULT_DOC_KEYS.filter((k) => docTypes.some((d) => d.key === k)),
   );
+  const [fplCeiling, setFplCeiling] = useState<number | null>(program ? program.fplCeiling : null);
   const [busy, setBusy] = useState(false);
 
   // when type changes on a NEW program, adopt that type's recommended sources
@@ -147,7 +164,7 @@ function ProgramEditor({ program, docTypes, onClose, toast }: {
   async function submit() {
     if (!name.trim() || busy) return;
     setBusy(true);
-    const payload = { name: name.trim(), short: (short || name).trim().slice(0, 22), color, type: typeId, sources, docs };
+    const payload = { name: name.trim(), short: (short || name).trim().slice(0, 22), color, type: typeId, sources, docs, fplCeiling };
     const res = program ? await updateProgram(program.id, payload) : await createProgram(payload);
     setBusy(false);
     toast(res.message);
@@ -237,6 +254,21 @@ function ProgramEditor({ program, docTypes, onClose, toast }: {
             ))}
           </div>
         </div>
+      </div>
+
+      <div style={{ marginBottom: 18 }}>
+        <div className="calv-label" style={{ marginBottom: 6 }}>Income eligibility ceiling — % of Federal Poverty Level</div>
+        <p style={{ fontSize: 11.5, color: "var(--calv-slate-65)", margin: "0 0 8px" }}>
+          Applications to this program are evaluated against this ceiling at intake and approval. Leave on the agency default unless this program&rsquo;s funding source sets a different limit.
+        </p>
+        <select
+          value={fplCeiling === null ? "" : String(fplCeiling)}
+          onChange={(e) => setFplCeiling(e.target.value === "" ? null : Number(e.target.value))}
+          style={{ maxWidth: 320 }}
+        >
+          <option value="">Agency default ({defaultCeiling}% FPL)</option>
+          {CEILING_OPTIONS.map((c) => <option key={c} value={c}>{c}% FPL{c === defaultCeiling ? " (same as agency default)" : ""}</option>)}
+        </select>
       </div>
 
       <div style={{ marginBottom: 18 }}>

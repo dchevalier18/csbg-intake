@@ -33,6 +33,7 @@ export interface AppRow {
   notes: string;
   programColor: string;
   programShort: string;
+  ceiling: number;       // effective FPL ceiling (%) for this application's program
   caseworker: string;
   fpl: { pct: number; label: string; tone: string; eligible: boolean; year: number };
   docs: AppDocRow[];
@@ -59,8 +60,8 @@ const stageOf = (a: AppRow) => STAGES.find((s) => s.id === a.stage) ?? STAGES[0]
 // vacuous truth — zero configured requirements counts as documents-satisfied
 const docsDone = (a: AppRow) => a.docs.every((d) => d.status === "verified");
 
-export default function EligibilityClient({ rows, ceiling, currentUserName }: {
-  rows: AppRow[]; ceiling: number; currentUserName: string;
+export default function EligibilityClient({ rows, currentUserName }: {
+  rows: AppRow[]; currentUserName: string;
 }) {
   const toast = useToast();
   const [openId, setOpenId] = useState<string | null>(null);
@@ -150,7 +151,7 @@ export default function EligibilityClient({ rows, ceiling, currentUserName }: {
                   <td className="cname">{a.first} {a.last}<div style={{ fontFamily: "var(--font-body)", fontWeight: 300, fontSize: 11.5, color: "var(--calv-slate-65)", textTransform: "none" }}>{a.id} · HH of {a.hhSize} · {a.county} Co.</div></td>
                   <td><ProgramDot color={a.programColor} label={a.programShort} /></td>
                   <td>{shortDate(a.applied)}</td>
-                  <td><Chip tone={st.tone}>{st.label}</Chip>{!st.eligible ? <div style={{ fontSize: 10.5, color: "#B73719", marginTop: 3 }}>over {ceiling}% ceiling</div> : null}</td>
+                  <td><Chip tone={st.tone}>{st.label}</Chip>{!st.eligible ? <div style={{ fontSize: 10.5, color: "#B73719", marginTop: 3 }}>over {a.ceiling}% ceiling</div> : null}</td>
                   <td style={{ minWidth: 130 }}>
                     <div className="meter-row"><div className={"meter " + (verified === docs.length ? "" : verified >= docs.length - 1 ? "warn" : "bad")} style={{ flex: 1 }}><i style={{ width: (docs.length ? (verified / docs.length) * 100 : 100) + "%" }}></i></div><span className="pct">{verified}/{docs.length}</span></div>
                   </td>
@@ -166,16 +167,15 @@ export default function EligibilityClient({ rows, ceiling, currentUserName }: {
       </Panel>
 
       {open ? (
-        <ApplicantModal a={open} ceiling={ceiling} currentUserName={currentUserName} onClose={() => setOpenId(null)}
+        <ApplicantModal a={open} currentUserName={currentUserName} onClose={() => setOpenId(null)}
           attach={attach} verify={verify} bypass={bypass} undo={undo} decide={decide} advance={advance} />
       ) : null}
     </div>
   );
 }
 
-function ApplicantModal({ a, ceiling, currentUserName, onClose, attach, verify, bypass, undo, decide, advance }: {
+function ApplicantModal({ a, currentUserName, onClose, attach, verify, bypass, undo, decide, advance }: {
   a: AppRow;
-  ceiling: number;
   currentUserName: string;
   onClose: () => void;
   attach: (aId: string, key: string, file: File) => void;
@@ -210,7 +210,7 @@ function ApplicantModal({ a, ceiling, currentUserName, onClose, attach, verify, 
     <Modal title={a.first + " " + a.last + " — eligibility review"} onClose={onClose} width={620}>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
         <Chip outline><ProgramDot color={a.programColor} label={a.programShort} /></Chip>
-        <Chip tone={st.tone}>{st.label} · {st.eligible ? "Income-eligible" : "Exceeds " + ceiling + "% ceiling"}</Chip>
+        <Chip tone={st.tone}>{st.label} · {st.eligible ? "Income-eligible" : "Exceeds " + a.ceiling + "% ceiling"}</Chip>
         <Chip outline>HH of {a.hhSize} · {money(a.income)}/yr</Chip>
         <Chip outline>{st.year} FPL schedule</Chip>
         <Chip outline>Applied {shortDate(a.applied)}</Chip>
@@ -260,7 +260,7 @@ function ApplicantModal({ a, ceiling, currentUserName, onClose, attach, verify, 
         <div style={{ marginBottom: 16 }}>
           <Field label="Denial reason (required — written to determination record)" required>
             <textarea rows={3} value={denyNote} onChange={(e) => setDenyNote(e.target.value)}
-              placeholder={st.eligible ? "Reason for denial…" : "e.g., Household income " + st.pct + "% of FPL exceeds CSBG " + ceiling + "% ceiling. Referred to United Way 211."} />
+              placeholder={st.eligible ? "Reason for denial…" : "e.g., Household income " + st.pct + "% of FPL exceeds the program's " + a.ceiling + "% ceiling. Referred to United Way 211."} />
           </Field>
         </div>
       ) : null}
@@ -277,7 +277,7 @@ function ApplicantModal({ a, ceiling, currentUserName, onClose, attach, verify, 
         </button>
       </div>
       {!ready ? <p style={{ fontSize: 11.5, color: "var(--calv-slate-65)", textAlign: "right", margin: "8px 0 0" }}>Approval unlocks when every document is verified.</p> : null}
-      {ready && !st.eligible ? <p style={{ fontSize: 11.5, color: "#B73719", textAlign: "right", margin: "8px 0 0" }}>Income exceeds the CSBG {ceiling}% FPL ceiling — approval is blocked; deny with referral.</p> : null}
+      {ready && !st.eligible ? <p style={{ fontSize: 11.5, color: "#B73719", textAlign: "right", margin: "8px 0 0" }}>Income exceeds this program&apos;s {a.ceiling}% FPL ceiling — approval is blocked; deny with referral, or reassign to a program with a higher ceiling.</p> : null}
 
       {bypassKey ? (
         <BypassPrompt applicantId={a.id} label={bypassDoc?.label ?? bypassKey} userName={currentUserName}

@@ -29,7 +29,7 @@ export default async function IntakePage({ searchParams }: {
     <IntakeClient
       lists={lists}
       fields={fields}
-      programs={programs.map((p) => ({ id: p.id, name: p.name }))}
+      programs={programs.map((p) => ({ id: p.id, name: p.name, ceiling: p.fplCeiling ?? org.csbgCeiling }))}
       requiredDocs={requiredDocs}
       docTypes={await getDocTypes()}
       fpl={{ year: fpl.year, base: fpl.base, perAdditional: fpl.perAdditional }}

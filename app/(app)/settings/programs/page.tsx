@@ -2,11 +2,13 @@ import { eq } from "drizzle-orm";
 import { db, t } from "@/db";
 import { requireAdmin } from "@/lib/auth";
 import { getPrograms } from "@/lib/access";
+import { getOrg } from "@/lib/data/core";
 import { ProgramsSettingsClient } from "./programs-client";
 
 export default async function ProgramsSettingsPage() {
   await requireAdmin();
   const programs = await getPrograms();
+  const org = await getOrg();
 
   // enrolled = active clients holding a membership in each program
   const activeClientIds = new Set(
@@ -32,6 +34,7 @@ export default async function ProgramsSettingsPage() {
   return (
     <ProgramsSettingsClient
       docTypes={docTypes}
+      defaultCeiling={org.csbgCeiling}
       programs={programs.map((p) => ({
         id: p.id,
         name: p.name,
@@ -39,6 +42,7 @@ export default async function ProgramsSettingsPage() {
         color: p.color,
         type: p.type,
         sources: p.sources,
+        fplCeiling: p.fplCeiling,
         docs: docsByProgram.get(p.id) ?? [],
         enrolled: enrolledByProgram.get(p.id) ?? 0,
       }))}

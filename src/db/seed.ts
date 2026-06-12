@@ -53,7 +53,8 @@ export async function runSeed(db: DB): Promise<void> {
     { id: "rtide", name: "Rising Tide Loan Fund",      short: "Rising Tide",     color: "#598E93", type: "loan-fund" },
     { id: "shfb",  name: "Second Harvest Food Bank",   short: "Second Harvest",  color: "#8A6410", type: "food-bank" },
     { id: "sss",   name: "Sixth Street Shelter",       short: "Sixth Street",    color: "#B5601F", type: "shelter" },
-    { id: "wx",    name: "Weatherization",             short: "Weatherization",  color: "#9EC1B0", type: "weatherization" },
+    // WX demonstrates the per-program ceiling — PA WAP qualifies households up to 200% FPL
+    { id: "wx",    name: "Weatherization",             short: "Weatherization",  color: "#9EC1B0", type: "weatherization", fplCeiling: 200 },
   ];
   await db.insert(t.programs).values(programs.map((p, i) => ({
     ...p,

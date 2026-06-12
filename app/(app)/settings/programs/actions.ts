@@ -20,6 +20,8 @@ export interface ProgramInput {
   type: string;
   sources: string[];
   docs: string[];
+  /** % of FPL eligibility ceiling for this program; null = agency default */
+  fplCeiling: number | null;
 }
 
 interface CleanProgram {
@@ -28,7 +30,11 @@ interface CleanProgram {
   color: string;
   type: string;
   sources: string[];
+  fplCeiling: number | null;
 }
+
+// same options the agency-wide ceiling offers (Settings → FPL)
+const CEILING_OPTIONS = [100, 125, 150, 175, 200];
 
 /** Validate + normalize editor input. Caps are never stored — they derive from the TYPE at render time. */
 async function cleanInput(input: ProgramInput): Promise<{ ok: true; value: CleanProgram; docs: string[] } | { ok: false; message: string }> {
@@ -42,7 +48,11 @@ async function cleanInput(input: ProgramInput): Promise<{ ok: true; value: Clean
     : [];
   const types = await getDocTypes();
   const docs = Array.isArray(input.docs) ? [...new Set(input.docs.filter((k) => Object.hasOwn(types, k)))] : [];
-  return { ok: true, value: { name, short, color, type: input.type, sources }, docs };
+  const fplCeiling = input.fplCeiling == null ? null : Number(input.fplCeiling);
+  if (fplCeiling !== null && !CEILING_OPTIONS.includes(fplCeiling)) {
+    return { ok: false, message: "Pick a valid income eligibility ceiling." };
+  }
+  return { ok: true, value: { name, short, color, type: input.type, sources, fplCeiling }, docs };
 }
 
 /** Replace a program's required-document keys with the given set. */
@@ -89,6 +99,12 @@ export async function updateProgram(id: string, input: ProgramInput): Promise<Ac
   const docsChanged = before.join("|") !== after.join("|");
 
   await db.update(t.programs).set(v.value).where(eq(t.programs.id, id));
+  // ceiling changes move the eligibility line for every open application — audit them
+  if ((existing.fplCeiling ?? null) !== v.value.fplCeiling) {
+    const label = (c: number | null) => (c === null ? "agency default" : `${c}% FPL`);
+    await audit(user.id, "program.ceiling", "program", id,
+      `Income eligibility ceiling: ${label(existing.fplCeiling)} → ${label(v.value.fplCeiling)}`);
+  }
   if (docsChanged) {
     await setProgramDocs(id, v.docs);
     // Requirement edits move the all-verified line in both directions: removing one
