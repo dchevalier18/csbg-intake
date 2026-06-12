@@ -38,6 +38,15 @@ export interface AppDocRow {
   bypass: { byName: string; when: string | null; reason: string } | null;
 }
 
+/** Raw intake answers — drives the editable Intake details view (shared with /denials). */
+export interface IntakeAnswers {
+  first: string; last: string; dob: string; phone: string; address: string;
+  county: string; hhType: string; hhSize: number; housing: string;
+  income: number; incomeSrc: string;
+  characteristics: Record<string, string>;
+  programId: string;
+}
+
 export interface AppRow {
   id: string;
   first: string;
@@ -53,14 +62,7 @@ export interface AppRow {
   ceiling: number;       // effective FPL ceiling (%) for this application's program
   caseworker: string;
   fpl: { pct: number; label: string; tone: string; eligible: boolean; year: number };
-  /** raw intake answers — drives the editable Intake details view */
-  intake: {
-    first: string; last: string; dob: string; phone: string; address: string;
-    county: string; hhType: string; hhSize: number; housing: string;
-    income: number; incomeSrc: string;
-    characteristics: Record<string, string>;
-    programId: string;
-  };
+  intake: IntakeAnswers;
   docs: AppDocRow[];
 }
 
@@ -345,13 +347,16 @@ const parseFieldOptions = (fd: IntakeFieldDef) =>
 
 /* Editable view of the application's original intake answers. Nothing locks when
    an application enters the queue — corrections and program reassignment happen
-   here (open stages only; every change is audited server-side). */
-function IntakeDetailsForm({ a, lists, fields, programs, onSave }: {
-  a: AppRow;
+   here (every change is audited server-side). The /denials review page reuses
+   this form with `programLocked` — denied applications stay editable so changed
+   circumstances can be recorded, but the program is chosen at reopen time. */
+export function IntakeDetailsForm({ a, lists, fields, programs, onSave, programLocked }: {
+  a: { id: string; intake: IntakeAnswers; fpl: { pct: number } };
   lists: Record<string, string[]>;
   fields: IntakeFieldDef[];
   programs: ProgramOption[];
   onSave: (payload: ApplicationUpdatePayload) => void;
+  programLocked?: boolean;
 }) {
   const listValues = (key: string | null | undefined) => (key ? lists[key] ?? [] : []);
   const [e, setE] = useState<Record<string, string>>(() => ({
@@ -417,6 +422,12 @@ function IntakeDetailsForm({ a, lists, fields, programs, onSave }: {
       </> : null}
 
       <h3 className="calv-label" style={{ fontSize: 12, marginBottom: 10 }}>Program assignment</h3>
+      {programLocked ? (
+        <p style={{ fontSize: 12.5, lineHeight: 1.55, color: "var(--calv-slate-65)", margin: "0 0 16px" }}>
+          Denied under <strong style={{ fontWeight: 600 }}>{programs.find((p) => p.id === a.intake.programId)?.name ?? a.intake.programId}</strong>.
+          A denied application keeps its program — you&apos;ll choose the program (same or different) when you reopen it.
+        </p>
+      ) : (
       <div style={{ marginBottom: 8 }}>
         <Field label="Enrolling program" hint="Move the application instead of redoing the intake — documents and verifications carry over where requirements overlap">
           <select value={e.program} onChange={(ev) => set("program", ev.target.value)}>
@@ -424,6 +435,7 @@ function IntakeDetailsForm({ a, lists, fields, programs, onSave }: {
           </select>
         </Field>
       </div>
+      )}
       {moved && target ? (
         <div style={{ background: "var(--calv-amber-15)", border: "1px solid var(--calv-amber-35)", borderRadius: 4, padding: "12px 14px", fontSize: 12.5, lineHeight: 1.55, display: "flex", gap: 10, alignItems: "flex-start", marginBottom: 16 }}>
           <I name="alert" size={16} style={{ color: AMBER_TEXT, marginTop: 1 }} />

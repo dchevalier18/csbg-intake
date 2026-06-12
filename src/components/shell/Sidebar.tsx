@@ -55,6 +55,7 @@ export function Sidebar({ org, navPrograms, isAdmin, applicantCount, fy }: {
       <div className="sect">Work</div>
       <NavLink href="/dashboard" active={is("/dashboard")} icon="home" label="Dashboard" />
       <NavLink href="/eligibility" active={is("/eligibility")} icon="shield" label="Eligibility queue" count={applicantCount} />
+      <NavLink href="/denials" active={is("/denials")} icon="rotate" label="Denials" />
       <NavLink href="/clients" active={is("/clients")} icon="users" label="Clients" />
       <NavLink href="/services" active={is("/services")} icon="hand" label="Service log" />
       <div className="sect">My programs</div>

@@ -249,6 +249,23 @@ export async function runSeed(db: DB): Promise<void> {
       programId: "cad-a", caseworkerId: "dr", stage: "decision", applied: "2026-05-18", fplYear: 2025, county: "Lehigh",
       docs: { id: "verified", income: "verified", residency: "verified" },
       notes: "Income 162% FPL — exceeds CSBG 125% ceiling. Recommend referral to United Way 211." },
+    // Past denials — reviewable on /denials; reopenable there for re-enrollment.
+    // Teresa was denied over-income (149% vs the 125% ceiling) — the demo path is
+    // correcting her income after a job loss, watching the re-check flip, and reopening.
+    { id: "A-1171", first: "Teresa", last: "Okafor", dob: "1988-03-14", hhSize: 3, income: 39800,
+      programId: "cad-b", caseworkerId: "ls", stage: "denied", applied: "2026-04-21", fplYear: 2025, county: "Northampton",
+      docs: { id: "verified", income: "verified", residency: "verified" },
+      notes: "Income re-verified at review — second job pushed the household over the ceiling.",
+      decisionNote: "Household income 149% of FPL exceeds the program's 125% ceiling. Referred to United Way 211 and LIHEAP.",
+      decidedBy: "jb", decidedAt: "2026-05-06T15:20:00.000Z" },
+    // Walter is income-eligible (91% FPL) but his paperwork never arrived — a
+    // straight reopen back to the 'docs' stage once he resurfaces.
+    { id: "A-1168", first: "Walter", last: "Hess", dob: "1961-11-02", hhSize: 1, income: 14300,
+      programId: "wx", caseworkerId: "mk", stage: "denied", applied: "2026-03-09", fplYear: 2025, county: "Lehigh",
+      docs: { id: "verified", income: "missing", residency: "submitted", utility: "missing", deed: "missing" },
+      notes: "Left voicemails 3/12 and 3/19; letter mailed 3/26. No response.",
+      decisionNote: "Required documents never received after three outreach attempts (3/12, 3/19, 3/26). Application closed — applicant may reapply when paperwork is available.",
+      decidedBy: "jb", decidedAt: "2026-04-02T13:05:00.000Z" },
   ];
   await db.insert(t.applications).values(applications.map(({ docs: _d, ...a }) => a));
   // Supporting files + verification sign-offs for docs already submitted/verified, so the

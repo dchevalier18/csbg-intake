@@ -39,6 +39,12 @@ async function main(): Promise<void> {
   const apps = await db.select().from(t.applications);
   check("applications seeded", apps.length > 0, `got ${apps.length}`);
 
+  // past denials feed the /denials review page — terminal stage with a full determination record
+  const denied = apps.filter((a) => a.stage === "denied");
+  check("denied applications seeded with determination records",
+    denied.length >= 2 && denied.every((a) => !!a.decisionNote && !!a.decidedBy && !!a.decidedAt),
+    `got ${denied.length}`);
+
   // eligibility document-verification rows, incl. the seeded A-1174 SSN bypass
   const bypass = (await db.select().from(t.applicationDocs)
     .where(and(eq(t.applicationDocs.applicationId, "A-1174"), eq(t.applicationDocs.docKey, "ssn"))))[0];
