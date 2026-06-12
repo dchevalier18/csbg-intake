@@ -125,6 +125,15 @@ export async function openApplications(programIds: string[]): Promise<Applicatio
     .sort((a, b) => b.applied.localeCompare(a.applied));
 }
 
+/** Denied applications for a set of program ids, most recent decision first. */
+export async function deniedApplications(programIds: string[]): Promise<Application[]> {
+  if (programIds.length === 0) return [];
+  return (await db.select().from(t.applications)
+    .where(inArray(t.applications.programId, programIds)))
+    .filter((a) => a.stage === "denied")
+    .sort((a, b) => (b.decidedAt ?? b.applied).localeCompare(a.decidedAt ?? a.applied));
+}
+
 // ---------- id generation ----------
 function nextNumericId(prefix: string, existing: string[]): string {
   let max = 0;

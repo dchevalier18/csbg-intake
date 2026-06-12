@@ -1,6 +1,7 @@
 "use server";
 /* Eligibility-queue mutations — document tracking, stage advancement,
-   and the approve/deny eligibility determinations. */
+   the approve/deny eligibility determinations, and reopening past denials
+   (the /denials review page shares these actions). */
 import { revalidatePath } from "next/cache";
 import { and, eq } from "drizzle-orm";
 import fs from "node:fs";
@@ -10,8 +11,8 @@ import type { Application, User } from "@/db/schema";
 import { requireUser } from "@/lib/auth";
 import { getProgram, userCanSeeProgram, audit } from "@/lib/access";
 import { getEnabledIntakeFields, requiredDocKeys, applicationDocsVerified, programCeiling, OPEN_STAGES, nextClientId } from "@/lib/data/core";
-import { fplStatusFor } from "@/lib/fpl";
-import { todayIso } from "@/lib/format";
+import { fplStatusFor, getActiveFpl } from "@/lib/fpl";
+import { localDateOf, shortDate, todayIso } from "@/lib/format";
 
 export interface ActionResult {
   ok: boolean;
@@ -30,8 +31,21 @@ function isoDatePlusDays(days: number): string {
 
 function revalidateQueue(): void {
   revalidatePath("/eligibility");
+  revalidatePath("/denials");
   revalidatePath("/dashboard");
   revalidatePath("/clients");
+}
+
+/** Bring the document checklist in line with a program's requirements. Existing
+    rows are KEPT — files and verifications carry over where requirements
+    overlap; requirements new to the program start as 'missing'. */
+async function syncDocChecklist(appId: string, programId: string): Promise<void> {
+  const have = new Set((await db.select({ docKey: t.applicationDocs.docKey }).from(t.applicationDocs)
+    .where(eq(t.applicationDocs.applicationId, appId))).map((d) => d.docKey));
+  const now = new Date().toISOString();
+  for (const docKey of (await requiredDocKeys(programId)).filter((k) => !have.has(k))) {
+    await db.insert(t.applicationDocs).values({ applicationId: appId, docKey, status: "missing", source: "staff", updatedAt: now });
+  }
 }
 
 /* ---------- document verification (attach / verify / signed bypass / undo) ---------- */
@@ -239,17 +253,25 @@ export interface ApplicationUpdatePayload {
     queue. Reassigning the program re-checks income against the NEW program's
     ceiling (live everywhere), re-syncs the required-document checklist (verified
     documents carry over where requirements overlap), and recomputes the stage —
-    a pending decision hand-off does not survive a move. All changes are audited. */
+    a pending decision hand-off does not survive a move. All changes are audited.
+    DENIED applications stay editable too (circumstances change — corrected
+    income or household size feed the re-enrollment review), but they keep their
+    program and stage until explicitly reopened. */
 export async function updateApplication(appId: string, payload: ApplicationUpdatePayload): Promise<ActionResult> {
   const user = await requireUser();
   const app = await loadApp(appId);
-  if (!app || !await userCanSeeProgram(user, app.programId) || !(OPEN_STAGES as readonly string[]).includes(app.stage)) {
-    return { ok: false, message: "Application not found or already decided." };
+  const editable = [...OPEN_STAGES, "denied"] as readonly string[];
+  if (!app || !await userCanSeeProgram(user, app.programId) || !editable.includes(app.stage)) {
+    return { ok: false, message: "Application not found or already enrolled." };
   }
   if (!payload.first.trim() || !payload.last.trim() || !payload.dob) {
     return { ok: false, message: "First name, last name, and date of birth are required." };
   }
+  const isDenied = app.stage === "denied";
   const programChanged = payload.programId !== app.programId;
+  if (isDenied && programChanged) {
+    return { ok: false, message: "A denied application can't be moved between programs — choose the program when reopening it." };
+  }
   if (programChanged) {
     if (!await userCanSeeProgram(user, payload.programId)) {
       return { ok: false, message: "You don't have access to move applications into that program." };
@@ -306,28 +328,23 @@ export async function updateApplication(appId: string, payload: ApplicationUpdat
   await db.update(t.applications).set(next).where(eq(t.applications.id, appId));
 
   if (programChanged) {
-    // checklist re-sync: existing rows are KEPT (files and verifications carry
-    // over where the new program shares a requirement); requirements new to the
-    // target program start as 'missing'
-    const have = new Set((await db.select({ docKey: t.applicationDocs.docKey }).from(t.applicationDocs)
-      .where(eq(t.applicationDocs.applicationId, appId))).map((d) => d.docKey));
-    const now = new Date().toISOString();
-    for (const docKey of (await requiredDocKeys(payload.programId)).filter((k) => !have.has(k))) {
-      await db.insert(t.applicationDocs).values({ applicationId: appId, docKey, status: "missing", source: "staff", updatedAt: now });
-    }
+    await syncDocChecklist(appId, payload.programId);
     await audit(user.id, "application.reassign", "application", appId,
       `Program ${app.programId} → ${payload.programId} by ${user.name} — checklist re-synced`);
   }
 
   // recompute the stage under the (possibly new) requirement list. Unlike the
   // document-action recompute, a reassignment also pulls 'decision' back — the
-  // hand-off belonged to the previous program.
-  const fresh = { ...app, ...next };
-  const all = await applicationDocsVerified(fresh);
-  const newStage = all ? "review" : "docs";
-  const stageMoves = programChanged ? ["docs", "review", "decision"] : ["docs", "review"];
-  if (stageMoves.includes(app.stage) && app.stage !== newStage) {
-    await db.update(t.applications).set({ stage: newStage }).where(eq(t.applications.id, appId));
+  // hand-off belonged to the previous program. A denied application never moves
+  // stage here — reopening is the explicit, audited path back into the queue.
+  if (!isDenied) {
+    const fresh = { ...app, ...next };
+    const all = await applicationDocsVerified(fresh);
+    const newStage = all ? "review" : "docs";
+    const stageMoves = programChanged ? ["docs", "review", "decision"] : ["docs", "review"];
+    if (stageMoves.includes(app.stage) && app.stage !== newStage) {
+      await db.update(t.applications).set({ stage: newStage }).where(eq(t.applications.id, appId));
+    }
   }
 
   await audit(user.id, "application.update", "application", appId,
@@ -337,7 +354,9 @@ export async function updateApplication(appId: string, payload: ApplicationUpdat
     ok: true,
     message: programChanged
       ? "Saved — application moved to the new program; eligibility and the document checklist now follow its requirements."
-      : "Intake details updated.",
+      : isDenied
+        ? "Intake details updated — the application stays denied until it's reopened."
+        : "Intake details updated.",
   };
 }
 
@@ -374,6 +393,63 @@ export async function denyApplication(appId: string, note: string): Promise<Acti
   await audit(user.id, "application.deny", "application", app.id, trimmed);
   revalidateQueue();
   return { ok: true, message: "Application denied — determination logged, referral letter queued." };
+}
+
+/** Reopen a denied application back into the eligibility pipeline — same or
+    different program — so the household can be re-enrolled without redoing the
+    intake. Requires a reason (≥ 8 chars, mirrors denial). The re-assessment
+    happens NOW: the FPL year re-pins to the active schedule, the checklist
+    follows the target program (verified documents carry over where requirements
+    overlap), and the stage recomputes from the checklist. The prior denial is
+    preserved in the audit log and summarized on the case-worker note; approval
+    still runs the full docs + income checks. */
+export async function reopenApplication(appId: string, programId: string, note: string): Promise<ActionResult> {
+  const user = await requireUser();
+  const app = await loadApp(appId);
+  if (!app || !await userCanSeeProgram(user, app.programId) || app.stage !== "denied") {
+    return { ok: false, message: "Application not found or isn't denied." };
+  }
+  const trimmed = note.trim();
+  if (trimmed.length < 8) {
+    return { ok: false, message: "A reopen reason (at least 8 characters) is required." };
+  }
+  const programChanged = programId !== app.programId;
+  if (programChanged) {
+    if (!await userCanSeeProgram(user, programId)) {
+      return { ok: false, message: "You don't have access to reopen applications into that program." };
+    }
+    const target = await getProgram(programId);
+    if (!target || target.active !== 1) return { ok: false, message: "That program no longer exists." };
+  }
+
+  // requirements may have changed since the denial (or differ in the target
+  // program) — make the checklist current before computing the re-entry stage
+  await syncDocChecklist(app.id, programId);
+  const all = await applicationDocsVerified({ ...app, programId });
+
+  const active = await getActiveFpl();
+  const deniedOn = app.decidedAt ? shortDate(localDateOf(app.decidedAt)) : "earlier";
+  const history = `Reopened ${shortDate(todayIso())} by ${user.name}: ${trimmed} (previously denied ${deniedOn}: "${app.decisionNote ?? "no note"}")`;
+
+  await db.update(t.applications).set({
+    stage: all ? "review" : "docs",
+    programId,
+    fplYear: active.year,                  // re-pin — eligibility is re-assessed as of today
+    decisionNote: null,
+    decidedBy: null,
+    decidedAt: null,
+    notes: app.notes ? `${app.notes} — ${history}` : history,
+  }).where(eq(t.applications.id, app.id));
+
+  await audit(user.id, "application.reopen", "application", app.id,
+    `${history}${programChanged ? ` — moved ${app.programId} → ${programId}, checklist re-synced` : ""} — re-assessed under the ${active.year} FPL schedule`);
+  revalidateQueue();
+  return {
+    ok: true,
+    message: all
+      ? "Application reopened — documents are still verified, so it re-enters the queue ready for review."
+      : "Application reopened — back in the eligibility queue, waiting on documents.",
+  };
 }
 
 /** Approve & enroll — creates the client record, pins the FPL year, logs SDA 1a. */
