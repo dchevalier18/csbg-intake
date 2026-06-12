@@ -1,16 +1,20 @@
 /* Reset + reseed the database from scratch: `npm run seed` */
-import fs from "node:fs";
-import path from "node:path";
+import { Client } from "pg";
+import { getTableName, is } from "drizzle-orm";
+import { PgTable } from "drizzle-orm/pg-core";
+import * as schema from "./schema";
+import { databaseUrl, dbReady, databaseInfo } from "./index";
 
-const DB_PATH = process.env.CSBG_DB_PATH || path.join(process.cwd(), "data", "csbg.db");
-
-for (const suffix of ["", "-wal", "-shm", "-journal"]) {
-  const p = DB_PATH + suffix;
-  if (fs.existsSync(p)) fs.rmSync(p);
+async function main(): Promise<void> {
+  const tables = Object.values(schema).filter((x) => is(x, PgTable)).map((x) => getTableName(x));
+  const client = new Client({ connectionString: databaseUrl });
+  await client.connect();
+  await client.query(tables.map((name) => `DROP TABLE IF EXISTS ${name} CASCADE;`).join("\n"));
+  await client.end();
+  await dbReady(); // bootstrap recreates the schema and auto-seeds the empty DB
+  const info = databaseInfo();
+  console.log(`Seeded fresh database ${info.database} at ${info.host}:${info.port}`);
+  console.log("Demo logins (password demo1234): dana, marcus, luz, robin, joan, terrence");
 }
 
-// importing the connection bootstraps the schema and auto-seeds the empty DB
-import("./index").then(() => {
-  console.log(`Seeded fresh database at ${DB_PATH}`);
-  console.log("Demo logins (password demo1234): dana, marcus, luz, robin, joan, terrence");
-});
+main().then(() => process.exit(0), (err) => { console.error(err); process.exit(1); });

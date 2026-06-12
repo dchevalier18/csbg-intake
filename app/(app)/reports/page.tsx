@@ -7,6 +7,6 @@ import { ReportsClient } from "./reports-client";
 
 export default async function ReportsPage() {
   await requireUser();
-  const data = buildRollup();
+  const data = await buildRollup();
   return <ReportsClient data={data} />;
 }

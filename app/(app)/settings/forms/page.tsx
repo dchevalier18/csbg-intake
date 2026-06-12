@@ -6,7 +6,7 @@ import { FormsClient } from "./forms-client";
 
 export default async function FormsSettingsPage() {
   await requireAdmin();
-  const fields = getAllIntakeFields().map((f) => ({
+  const fields = (await getAllIntakeFields()).map((f) => ({
     id: f.id,
     label: f.label,
     code: f.code,
@@ -16,8 +16,8 @@ export default async function FormsSettingsPage() {
     enabled: f.enabled,
     builtin: f.builtin,
   }));
-  const listRows = db.select().from(t.lists).all();
-  const valueRows = db.select().from(t.listValues).orderBy(asc(t.listValues.sort)).all();
+  const listRows = await db.select().from(t.lists);
+  const valueRows = await db.select().from(t.listValues).orderBy(asc(t.listValues.sort));
   const lists = listRows.map((l) => ({
     key: l.key,
     label: l.label,

@@ -131,12 +131,12 @@ function buildPacket(d: ReportRollup): string {
 export async function GET(req: Request): Promise<Response> {
   const user = await requireUser();
   const packet = new URL(req.url).searchParams.get("packet") === "1";
-  const d = buildRollup();
+  const d = await buildRollup();
 
   const body = packet ? buildPacket(d) : buildCsv(d);
   const filename = `csbg-annual-report-${d.fy.short.toLowerCase()}-${packet ? "packet.md" : "rollup.csv"}`;
 
-  audit(
+  await audit(
     user.id,
     packet ? "report.packet" : "report.export",
     "report",

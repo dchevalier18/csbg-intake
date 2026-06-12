@@ -8,10 +8,10 @@ import VolunteersClient, { type VolRow, type VolStats } from "./volunteers-clien
 
 export default async function VolunteersPage() {
   const user = await requireUser();
-  if (!userHasCap(user, "volunteers")) return <Restricted what="volunteer tracking" />;
+  if (!await userHasCap(user, "volunteers")) return <Restricted what="volunteer tracking" />;
 
-  const ids = visibleProgramIds(user);
-  const links = db.select().from(t.volunteerPrograms).all();
+  const ids = await visibleProgramIds(user);
+  const links = await db.select().from(t.volunteerPrograms);
   const byVol = new Map<string, string[]>();
   for (const l of links) {
     const arr = byVol.get(l.volunteerId) ?? [];
@@ -19,11 +19,11 @@ export default async function VolunteersPage() {
     byVol.set(l.volunteerId, arr);
   }
 
-  const programs = getPrograms();
+  const programs = await getPrograms();
   const progById = new Map(programs.map((p) => [p.id, p]));
-  const clientIds = new Set(visibleClients(user).map((c) => c.id));
+  const clientIds = new Set((await visibleClients(user)).map((c) => c.id));
 
-  const rows: VolRow[] = db.select().from(t.volunteers).all()
+  const rows: VolRow[] = (await db.select().from(t.volunteers))
     .filter((v) => (byVol.get(v.id) ?? []).some((pid) => ids.has(pid)))
     .map((v) => ({
       id: v.id,
@@ -40,7 +40,7 @@ export default async function VolunteersPage() {
       lastShift: v.lastShift,
     }));
 
-  const stats = kvGet<VolStats>("volStats", { totalHoursFY: 0, lowIncomeHoursFY: 0, activeVolunteers: 0 });
+  const stats = await kvGet<VolStats>("volStats", { totalHoursFY: 0, lowIncomeHoursFY: 0, activeVolunteers: 0 });
 
   return <VolunteersClient stats={stats} rows={rows} fyShort={currentFY().short} today={todayIso()} />;
 }

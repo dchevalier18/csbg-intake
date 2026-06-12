@@ -1,11 +1,10 @@
 import "server-only";
-import { gt, or } from "drizzle-orm";
 import { db, t } from "@/db";
 import { getOrg, getEnabledIntakeFields, listValuesFor, kvGet } from "@/lib/data/core";
 import { fplStatusFor } from "@/lib/fpl";
 import { completenessPct } from "@/lib/completeness";
 import { ageFromDob, currentFY, todayIso } from "@/lib/format";
-import { FPL_BANDS, domainById } from "@/lib/csbg-catalog";
+import { FPL_BANDS, domainById, fnpiByCode } from "@/lib/csbg-catalog";
 import type { MiniRow, MiniTableData, ReportRollup } from "./types";
 
 /* ============================================================
@@ -45,14 +44,14 @@ function shortServiceLabel(label: string): string {
   return base.charAt(0).toLowerCase() + base.slice(1);
 }
 
-export function buildRollup(): ReportRollup {
+export async function buildRollup(): Promise<ReportRollup> {
   const fy = currentFY();
-  const org = getOrg();
-  const fields = getEnabledIntakeFields();
-  const clients = db.select().from(t.clients).all().filter((c) => c.status === "active");
+  const org = await getOrg();
+  const fields = await getEnabledIntakeFields();
+  const clients = (await db.select().from(t.clients)).filter((c) => c.status === "active");
   const n = clients.length;
 
-  const agency = kvGet<{ individualsServed: number; householdsServed: number; newThisFY: number }>(
+  const agency = await kvGet<{ individualsServed: number; householdsServed: number; newThisFY: number }>(
     "agency", { individualsServed: 0, householdsServed: 0, newThisFY: 0 },
   );
 
@@ -61,29 +60,32 @@ export function buildRollup(): ReportRollup {
     : Math.round((clients.filter((c) => completenessPct(c, fields) === 100).length / n) * 100);
 
   // ---------- Section C — All Characteristics Report (tallied live) ----------
+  // D12 — % FPL band computed with each client's PINNED guideline year (point-in-time integrity).
+  const fplBands = await Promise.all(
+    clients.map((c) => fplStatusFor(c.income, c.hhSize, c.fplYear, org.csbgCeiling).then((s) => s.band)),
+  );
   const characteristics: MiniTableData[] = [
     { title: "C1 · Sex", code: "Sec. C1", total: n,
-      rows: tally(clients.map((c) => c.sex), listValuesFor("sex"), false) },
+      rows: tally(clients.map((c) => c.sex), await listValuesFor("sex"), false) },
     { title: "C2 · Age", code: "Sec. C2", total: n,
       rows: tally(clients.map((c) => ageBandOf(c.dob)), AGE_BANDS) },
     { title: "C6 · Race & ethnicity", code: "Sec. C6", total: n,
-      rows: tally(clients.map((c) => c.race), listValuesFor("race")) },
+      rows: tally(clients.map((c) => c.race), await listValuesFor("race")) },
     { title: "D9 · Household type", code: "Sec. D9", total: n,
-      rows: tally(clients.map((c) => c.hhType), listValuesFor("hhType")) },
+      rows: tally(clients.map((c) => c.hhType), await listValuesFor("hhType")) },
     { title: "D11 · Housing", code: "Sec. D11", total: n,
-      rows: tally(clients.map((c) => c.housing), listValuesFor("housing")) },
-    // D12 — % FPL band computed with each client's PINNED guideline year (point-in-time integrity).
+      rows: tally(clients.map((c) => c.housing), await listValuesFor("housing")) },
     { title: "D12 · Income level (% FPL)", code: "Sec. D12", total: n,
-      rows: tally(clients.map((c) => fplStatusFor(c.income, c.hhSize, c.fplYear, org.csbgCeiling).band), [...FPL_BANDS]) },
+      rows: tally(fplBands, [...FPL_BANDS]) },
   ];
 
   // ---------- Section A — services by domain ----------
   // The kv aggregates are the imported pre-system baseline (CAP60/legacy history);
   // everything recorded in THIS system's service log is layered on top live, so
   // "Service logged — mapped to <code> for the rollup" is actually true.
-  const allServices = db.select().from(t.services).all();
+  const allServices = await db.select().from(t.services);
   const domainOf = new Map(allServices.map((s) => [s.code, s.domain]));
-  const fyLog = db.select().from(t.serviceLog).all()
+  const fyLog = (await db.select().from(t.serviceLog))
     .filter((s) => s.date >= fy.start && s.date <= fy.end);
   const liveByDomain = new Map<string, number>();
   const liveByCode = new Map<string, number>();
@@ -93,7 +95,7 @@ export function buildRollup(): ReportRollup {
     liveByCode.set(s.code, (liveByCode.get(s.code) ?? 0) + 1);
   }
 
-  const baseline = new Map(kvGet<Array<{ domain: string; count: number }>>("srvByDomain", [])
+  const baseline = new Map((await kvGet<Array<{ domain: string; count: number }>>("srvByDomain", []))
     .map((d) => [d.domain, d.count]));
   const srvByDomain = [...new Set([...baseline.keys(), ...liveByDomain.keys()])]
     .flatMap((id) => {
@@ -104,7 +106,7 @@ export function buildRollup(): ReportRollup {
     .sort((a, b) => b.count - a.count);
 
   const serviceLabels = new Map(allServices.map((s) => [s.code, s.label]));
-  const topBaseline = new Map(kvGet<Array<{ code: string; count: number }>>("topServices", [])
+  const topBaseline = new Map((await kvGet<Array<{ code: string; count: number }>>("topServices", []))
     .map((s) => [s.code, s.count]));
   const topServices = [...new Set([...topBaseline.keys(), ...liveByCode.keys()])]
     .map((code) => ({
@@ -116,11 +118,39 @@ export function buildRollup(): ReportRollup {
     .slice(0, 3);
 
   // ---------- Section B — Individual & Family NPIs ----------
-  const fnpi = db.select().from(t.fnpiProgress)
-    .where(or(gt(t.fnpiProgress.served, 0), gt(t.fnpiProgress.target, 0)))
-    .all()
-    .sort((a, b) => a.code.localeCompare(b.code, "en", { numeric: true }))
-    .map((f) => ({ code: f.code, label: f.label, served: f.served, target: f.target, actual: f.actual }));
+  // Counts come live from the client-level outcome log (unduplicated individuals
+  // per indicator this FY); fnpi_progress contributes only the FY targets.
+  // served = clients with any recorded outcome; actual = clients who achieved it.
+  const fyOutcomes = (await db.select().from(t.outcomeLog))
+    .filter((o) => o.date >= fy.start && o.date <= fy.end);
+  const servedBy = new Map<string, Set<string>>();
+  const achievedBy = new Map<string, Set<string>>();
+  for (const o of fyOutcomes) {
+    if (!servedBy.has(o.code)) servedBy.set(o.code, new Set());
+    servedBy.get(o.code)!.add(o.clientId);
+    if (o.status === "achieved") {
+      if (!achievedBy.has(o.code)) achievedBy.set(o.code, new Set());
+      achievedBy.get(o.code)!.add(o.clientId);
+    }
+  }
+  // fnpi_progress carries the FY targets, plus any served/actual a pre-system database
+  // recorded as aggregates (the seed sets these to 0, so a fresh install is purely live).
+  // Layer live outcome-log counts on top of that baseline — the same pre-system-baseline
+  // pattern Section A uses for srvByDomain/topServices.
+  const targets = new Map((await db.select().from(t.fnpiProgress)).map((f) => [f.code, f]));
+  const fnpi = [...new Set([...targets.keys(), ...servedBy.keys()])]
+    .map((code) => {
+      const base = targets.get(code);
+      return {
+        code,
+        label: fnpiByCode(code)?.label ?? base?.label ?? code,
+        served: (base?.served ?? 0) + (servedBy.get(code)?.size ?? 0),
+        target: base?.target ?? 0,
+        actual: (base?.actual ?? 0) + (achievedBy.get(code)?.size ?? 0),
+      };
+    })
+    .filter((f) => f.served > 0 || f.target > 0)
+    .sort((a, b) => a.code.localeCompare(b.code, "en", { numeric: true }));
 
   return {
     fy: { label: fy.label, short: fy.short, range: fy.range, pctElapsed: fy.pctElapsed },

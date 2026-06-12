@@ -8,28 +8,28 @@ import { ProjectsClient, type ProjectDTO } from "./projects-client";
 
 export default async function ProjectsPage() {
   const user = await requireUser();
-  if (!userHasCap(user, "construction")) return <Restricted what="construction projects" />;
+  if (!await userHasCap(user, "construction")) return <Restricted what="construction projects" />;
 
   // server-side scoping: only projects owned by a visible, construction-capable program
-  const constructionPrograms = visiblePrograms(user)
+  const constructionPrograms = (await visiblePrograms(user))
     .filter((p) => programType(p.type).caps.includes("construction"));
   const programIds = constructionPrograms.map((p) => p.id);
 
   const projects = programIds.length
-    ? db.select().from(t.projects).where(inArray(t.projects.programId, programIds)).all()
+    ? await db.select().from(t.projects).where(inArray(t.projects.programId, programIds))
     : [];
   const projectIds = projects.map((p) => p.id);
 
   const milestones = projectIds.length
-    ? db.select().from(t.projectMilestones)
+    ? await db.select().from(t.projectMilestones)
         .where(inArray(t.projectMilestones.projectId, projectIds))
         .orderBy(asc(t.projectMilestones.sort))
-        .all()
+        
     : [];
   const requirements = projectIds.length
-    ? db.select().from(t.projectRequirements)
+    ? await db.select().from(t.projectRequirements)
         .where(inArray(t.projectRequirements.projectId, projectIds))
-        .all()
+        
     : [];
 
   const data: ProjectDTO[] = projects.map((p) => ({

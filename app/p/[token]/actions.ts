@@ -16,41 +16,41 @@ export async function portalUploadDoc(token: string, docKey: string): Promise<Po
   if (!token || !docKey) {
     return { ok: false, message: "Something went wrong. Call your case worker." };
   }
-  const app = db.select().from(t.applications).where(eq(t.applications.portalToken, token)).get();
+  const app = (await db.select().from(t.applications).where(eq(t.applications.portalToken, token)))[0];
   if (!app) {
     return { ok: false, message: "This link isn't active. Call your case worker for a new one." };
   }
   if (!(OPEN_STAGES as readonly string[]).includes(app.stage)) {
     return { ok: false, message: "A decision has already been made — your case worker will follow up." };
   }
-  if (!requiredDocKeys(app.programId).includes(docKey)) {
+  if (!(await requiredDocKeys(app.programId)).includes(docKey)) {
     return { ok: false, message: "That document isn't on your checklist." };
   }
 
-  const existing = db.select().from(t.applicationDocs)
+  const existing = (await db.select().from(t.applicationDocs)
     .where(and(eq(t.applicationDocs.applicationId, app.id), eq(t.applicationDocs.docKey, docKey)))
-    .get();
+    )[0];
   if (existing && existing.status !== "missing") {
     return { ok: false, message: "We already have that document — it's being reviewed." };
   }
 
   const now = new Date().toISOString();
   if (existing) {
-    db.update(t.applicationDocs)
+    await db.update(t.applicationDocs)
       .set({ status: "submitted", source: "portal", updatedAt: now })
       .where(and(eq(t.applicationDocs.applicationId, app.id), eq(t.applicationDocs.docKey, docKey)))
-      .run();
+      ;
   } else {
-    db.insert(t.applicationDocs)
+    await db.insert(t.applicationDocs)
       .values({ applicationId: app.id, docKey, status: "submitted", source: "portal", updatedAt: now })
-      .run();
+      ;
   }
 
-  audit(null, "application.doc.portal-upload", "application", app.id, `${docKey} submitted via client portal`);
+  await audit(null, "application.doc.portal-upload", "application", app.id, `${docKey} submitted via client portal`);
   revalidatePath("/eligibility");
   revalidatePath(`/p/${token}`);
 
-  const cw = staffById(app.caseworkerId);
+  const cw = await staffById(app.caseworkerId);
   const cwFirst = cw ? cw.name.split(" ")[0] : "your case worker";
   return {
     ok: true,

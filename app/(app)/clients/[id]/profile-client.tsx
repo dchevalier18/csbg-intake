@@ -1,12 +1,13 @@
 "use client";
-/* Client 360° profile — interactive shell (follow-up + capture-now modals). */
+/* Client 360° profile — interactive shell (follow-up + capture-now + record-outcome modals). */
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { Chip, CodeChip, Field, Panel, ProgramDot } from "@/components/ui";
-import { Modal } from "@/components/ui-client";
+import { Modal, Seg } from "@/components/ui-client";
 import { useToast } from "@/components/toast";
 import { I } from "@/components/icons";
-import { scheduleFollowUp, captureFields } from "./actions";
+import { DOMAINS, FNPIS } from "@/lib/csbg-catalog";
+import { scheduleFollowUp, captureFields, recordOutcome } from "./actions";
 
 export interface GapField {
   id: string;
@@ -15,7 +16,19 @@ export interface GapField {
   options?: string[];
 }
 
-export function ClientProfile({ client, status, programs, completeness, characteristics, gaps, services, followUp }: {
+export interface OutcomeRow {
+  id: number;
+  code: string;
+  label: string;
+  status: string;           // 'working' | 'achieved'
+  date: string;
+  note: string;
+}
+
+const OUTCOME_STATUS_OPTIONS = ["Achieved", "Working toward"];
+const fnpiDomains = DOMAINS.filter((d) => FNPIS.some((f) => f.domain === d.id));
+
+export function ClientProfile({ client, status, programs, completeness, characteristics, gaps, services, outcomes, outcomePrograms, followUp }: {
   client: { id: string; first: string; last: string; enrolledLong: string; address: string; phone: string | null };
   status: { tone: string; label: string; eligible: boolean; guidelines: string };
   programs: { color: string; short: string }[];
@@ -23,14 +36,21 @@ export function ClientProfile({ client, status, programs, completeness, characte
   characteristics: Array<[string, string]>;
   gaps: GapField[];
   services: { id: number; code: string; label: string; date: string; note: string }[];
+  outcomes: OutcomeRow[];
+  outcomePrograms: { id: string; short: string }[];
   followUp: { dueSub?: string; body: string; defaultDate: string };
 }) {
   const toast = useToast();
   const [pending, startTransition] = useTransition();
   const [showSchedule, setShowSchedule] = useState(false);
   const [showCapture, setShowCapture] = useState(false);
+  const [showOutcome, setShowOutcome] = useState(false);
   const [date, setDate] = useState(followUp.defaultDate);
   const [vals, setVals] = useState<Record<string, string>>({});
+  const [fnpiCode, setFnpiCode] = useState("");
+  const [fnpiProgram, setFnpiProgram] = useState(outcomePrograms[0]?.id ?? "");
+  const [fnpiStatus, setFnpiStatus] = useState(OUTCOME_STATUS_OPTIONS[0]);
+  const [fnpiNote, setFnpiNote] = useState("");
 
   const submitSchedule = () => {
     startTransition(async () => {
@@ -45,6 +65,22 @@ export function ClientProfile({ client, status, programs, completeness, characte
       const res = await captureFields(client.id, vals);
       toast(res.message);
       if (res.ok) { setShowCapture(false); setVals({}); }
+    });
+  };
+
+  const submitOutcome = () => {
+    startTransition(async () => {
+      const res = await recordOutcome(client.id, {
+        code: fnpiCode,
+        programId: fnpiProgram,
+        status: fnpiStatus === "Achieved" ? "achieved" : "working",
+        note: fnpiNote,
+      });
+      toast(res.message);
+      if (res.ok) {
+        setShowOutcome(false);
+        setFnpiCode(""); setFnpiNote(""); setFnpiStatus(OUTCOME_STATUS_OPTIONS[0]);
+      }
     });
   };
 
@@ -108,6 +144,29 @@ export function ClientProfile({ client, status, programs, completeness, characte
                 </div>
               ))}
           </Panel>
+          <Panel
+            title="Outcomes (FNPI)"
+            sub={outcomes.length + (outcomes.length === 1 ? " indicator" : " indicators") + " recorded this FY — rolls into Module 3, Section B."}
+            right={
+              <button className="calv-btn calv-btn--primary calv-btn--sm" onClick={() => setShowOutcome(true)}>
+                <I name="plus" size={13} /> Record outcome
+              </button>}
+          >
+            {outcomes.length === 0 ? <div className="empty" style={{ padding: 20 }}>No outcomes recorded yet this FY.</div> :
+              outcomes.map((o) => (
+                <div key={o.id} style={{ padding: "10px 2px", borderBottom: "1px solid var(--calv-slate-15)" }}>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 4 }}>
+                    <span style={{ fontWeight: 600, fontSize: 13 }}>{o.label}</span>
+                    <CodeChip code={o.code} />
+                    <span style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
+                      <Chip tone={o.status === "achieved" ? "sage" : "amber"}>{o.status === "achieved" ? "Achieved" : "In progress"}</Chip>
+                      <span style={{ fontSize: 11.5, color: "var(--calv-slate-65)" }}>{o.date}</span>
+                    </span>
+                  </div>
+                  {o.note ? <div style={{ fontSize: 12.5, color: "var(--calv-slate-65)" }}>{o.note}</div> : null}
+                </div>
+              ))}
+          </Panel>
           <Panel title="Next outcome check-in" sub={followUp.dueSub}>
             <p style={{ fontSize: 13, margin: 0, lineHeight: 1.55 }}>{followUp.body}</p>
           </Panel>
@@ -160,6 +219,57 @@ export function ClientProfile({ client, status, programs, completeness, characte
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 18 }}>
             <button className="calv-btn calv-btn--quiet calv-btn--sm" onClick={() => setShowCapture(false)}>Cancel</button>
             <button className="calv-btn calv-btn--primary calv-btn--sm" disabled={pending} onClick={submitCapture}>Save to record</button>
+          </div>
+        </Modal>
+      ) : null}
+
+      {showOutcome ? (
+        <Modal title="Record an FNPI outcome" width={520} onClose={() => setShowOutcome(false)}>
+          <p style={{ fontSize: 12.5, color: "var(--calv-slate-65)", margin: "0 0 14px" }}>
+            One record per indicator per FY — recording again updates the existing entry, so Section B counts stay unduplicated.
+          </p>
+          <div className="fgrid">
+            <Field label="Indicator" required>
+              <select value={fnpiCode} onChange={(e) => setFnpiCode(e.target.value)} autoFocus>
+                <option value="">Select…</option>
+                {fnpiDomains.map((d) => (
+                  <optgroup key={d.id} label={d.name}>
+                    {FNPIS.filter((f) => f.domain === d.id).map((f) => (
+                      <option key={f.code} value={f.code}>{f.label + "  (" + f.code + ")"}</option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+            </Field>
+            {outcomePrograms.length > 1 ? (
+              <Field label="Program" required>
+                <select value={fnpiProgram} onChange={(e) => setFnpiProgram(e.target.value)}>
+                  {outcomePrograms.map((p) => <option key={p.id} value={p.id}>{p.short}</option>)}
+                </select>
+              </Field>
+            ) : null}
+            <Field label="Status" required>
+              <Seg options={OUTCOME_STATUS_OPTIONS} value={fnpiStatus} onChange={setFnpiStatus} />
+            </Field>
+            <Field label="Note (optional)">
+              <input value={fnpiNote} onChange={(e) => setFnpiNote(e.target.value)} placeholder="What changed for this client?" />
+            </Field>
+          </div>
+          {fnpiCode ? (
+            <p style={{ fontSize: 12, color: "var(--calv-slate-65)", margin: "12px 0 0" }}>
+              Will count under <span className="code-chip">{fnpiCode}</span> in Module 3, Section B — {fnpiStatus === "Achieved" ? "served and achieving the outcome" : "served, with the outcome in progress"}.
+            </p>
+          ) : null}
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 18 }}>
+            <button className="calv-btn calv-btn--quiet calv-btn--sm" onClick={() => setShowOutcome(false)}>Cancel</button>
+            <button
+              className="calv-btn calv-btn--primary calv-btn--sm"
+              disabled={!fnpiCode || pending}
+              style={!fnpiCode || pending ? { opacity: 0.45, cursor: "not-allowed" } : undefined}
+              onClick={submitOutcome}
+            >
+              <I name="check" size={13} /> Record outcome
+            </button>
           </div>
         </Modal>
       ) : null}

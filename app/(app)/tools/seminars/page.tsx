@@ -12,24 +12,24 @@ const COMMON_CODES = ["SRV 3a", "SRV 4d", "SRV 2q"];
 
 export default async function SeminarsPage() {
   const user = await requireUser();
-  if (!userHasCap(user, "seminars")) return <Restricted what="seminar tools" />;
+  if (!await userHasCap(user, "seminars")) return <Restricted what="seminar tools" />;
 
   // server-side scoping: only seminars owned by a visible, seminars-capable program
-  const seminarPrograms = visiblePrograms(user)
+  const seminarPrograms = (await visiblePrograms(user))
     .filter((p) => programType(p.type).caps.includes("seminars"));
   const programIds = seminarPrograms.map((p) => p.id);
 
   const seminars = programIds.length
-    ? db.select().from(t.seminars)
+    ? await db.select().from(t.seminars)
         .where(inArray(t.seminars.programId, programIds))
         .orderBy(asc(t.seminars.date))
-        .all()
+        
     : [];
 
   const attendees = seminars.length
-    ? db.select().from(t.seminarAttendees)
+    ? await db.select().from(t.seminarAttendees)
         .where(inArray(t.seminarAttendees.seminarId, seminars.map((s) => s.id)))
-        .all()
+        
     : [];
 
   const data: SeminarDTO[] = seminars.map((s) => ({
@@ -53,10 +53,10 @@ export default async function SeminarsPage() {
   }));
 
   // SRV-code menu: the three usual seminar codes + free pick from Income/Housing services
-  const activeServices = db.select().from(t.services)
+  const activeServices = await db.select().from(t.services)
     .where(eq(t.services.active, 1))
     .orderBy(asc(t.services.sort))
-    .all();
+    ;
   const shortLabel = (l: string) => l.split(" (e.g.")[0];
   const srvOptions: SrvOption[] = [
     ...COMMON_CODES

@@ -15,7 +15,13 @@ export interface ProgramCard {
   color: string;
   type: string;
   sources: string[];
+  docs: string[];
   enrolled: number;
+}
+
+export interface DocTypeOption {
+  key: string;
+  label: string;
 }
 
 const KICK: React.CSSProperties = {
@@ -23,7 +29,13 @@ const KICK: React.CSSProperties = {
   textTransform: "uppercase", color: "var(--calv-slate-65)", marginBottom: 6,
 };
 
-export function ProgramsSettingsClient({ programs }: { programs: ProgramCard[] }) {
+/** "Income proof — 30 days (pay stubs / award letters)" → "Income proof" for card chips. */
+const shortDocLabel = (label: string): string => label.replace(/\s*\(.*\)\s*$/, "").split(" — ")[0];
+
+// CSBG eligibility baseline — pre-checked for new programs, admin can uncheck
+const DEFAULT_DOC_KEYS = ["id", "income", "residency"];
+
+export function ProgramsSettingsClient({ programs, docTypes }: { programs: ProgramCard[]; docTypes: DocTypeOption[] }) {
   const toast = useToast();
   const [editing, setEditing] = useState<ProgramCard | "new" | null>(null);
 
@@ -65,6 +77,17 @@ export function ProgramsSettingsClient({ programs }: { programs: ProgramCard[] }
                       : <span style={{ fontSize: 12, color: "var(--calv-slate-65)" }}>core case management only</span>}
                   </div>
                 </div>
+                <div style={{ marginTop: 12 }}>
+                  <div style={KICK}>Required documents</div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    {p.docs.length
+                      ? p.docs.map((k) => {
+                          const d = docTypes.find((x) => x.key === k);
+                          return <Chip key={k} outline><I name="doc" size={11} /> {d ? shortDocLabel(d.label) : k}</Chip>;
+                        })
+                      : <span style={{ fontSize: 12, color: "var(--calv-slate-65)" }}>none — applications skip the document stage</span>}
+                  </div>
+                </div>
                 {p.sources.length ? (
                   <div style={{ marginTop: 12 }}>
                     <div style={KICK}>Data sources</div>
@@ -82,6 +105,7 @@ export function ProgramsSettingsClient({ programs }: { programs: ProgramCard[] }
       {editing ? (
         <ProgramEditor
           program={editing === "new" ? null : editing}
+          docTypes={docTypes}
           onClose={() => setEditing(null)}
           toast={toast}
         />
@@ -90,8 +114,9 @@ export function ProgramsSettingsClient({ programs }: { programs: ProgramCard[] }
   );
 }
 
-function ProgramEditor({ program, onClose, toast }: {
+function ProgramEditor({ program, docTypes, onClose, toast }: {
   program: ProgramCard | null;
+  docTypes: DocTypeOption[];
   onClose: () => void;
   toast: (msg: string) => void;
 }) {
@@ -102,6 +127,9 @@ function ProgramEditor({ program, onClose, toast }: {
   const [color, setColor] = useState(program ? program.color : PROGRAM_COLORS[1]);
   const t = programType(typeId);
   const [sources, setSources] = useState<string[]>(program ? program.sources.slice() : t.sources.slice());
+  const [docs, setDocs] = useState<string[]>(
+    program ? program.docs.slice() : DEFAULT_DOC_KEYS.filter((k) => docTypes.some((d) => d.key === k)),
+  );
   const [busy, setBusy] = useState(false);
 
   // when type changes on a NEW program, adopt that type's recommended sources
@@ -112,11 +140,14 @@ function ProgramEditor({ program, onClose, toast }: {
   function toggleSource(s: string) {
     setSources((prev) => (prev.includes(s) ? prev.filter((x) => x !== s) : [...prev, s]));
   }
+  function toggleDoc(k: string) {
+    setDocs((prev) => (prev.includes(k) ? prev.filter((x) => x !== k) : [...prev, k]));
+  }
 
   async function submit() {
     if (!name.trim() || busy) return;
     setBusy(true);
-    const payload = { name: name.trim(), short: (short || name).trim().slice(0, 22), color, type: typeId, sources };
+    const payload = { name: name.trim(), short: (short || name).trim().slice(0, 22), color, type: typeId, sources, docs };
     const res = program ? await updateProgram(program.id, payload) : await createProgram(payload);
     setBusy(false);
     toast(res.message);
@@ -205,6 +236,27 @@ function ProgramEditor({ program, onClose, toast }: {
               </label>
             ))}
           </div>
+        </div>
+      </div>
+
+      <div style={{ marginBottom: 18 }}>
+        <div className="calv-label" style={{ marginBottom: 6 }}>Required documents — verified before approval</div>
+        <p style={{ fontSize: 11.5, color: "var(--calv-slate-65)", margin: "0 0 8px" }}>
+          Checklist changes apply to every open application immediately. With no requirements, applications skip the document stage.
+        </p>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
+          {docTypes.map((d) => (
+            <label
+              key={d.key}
+              style={{
+                display: "flex", gap: 6, alignItems: "center", padding: "6px 10px",
+                border: "1px solid var(--calv-slate-15)", borderRadius: 4, fontSize: 12, cursor: "pointer",
+                background: docs.includes(d.key) ? "var(--calv-teal-15)" : "#fff",
+              }}
+            >
+              <input type="checkbox" checked={docs.includes(d.key)} onChange={() => toggleDoc(d.key)} style={{ accentColor: "var(--brand)" }} /> {d.label}
+            </label>
+          ))}
         </div>
       </div>
 

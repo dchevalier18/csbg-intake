@@ -4,7 +4,7 @@ import { OrgSettingsClient } from "./org-client";
 
 export default async function OrganizationSettingsPage() {
   await requireAdmin();
-  const org = getOrg();
+  const org = await getOrg();
   return (
     <OrgSettingsClient
       org={{

@@ -7,18 +7,18 @@ import LoansClient, { type LoanRow } from "./loans-client";
 
 export default async function LoansPage() {
   const user = await requireUser();
-  if (!userHasCap(user, "loans")) return <Restricted what="loan servicing" />;
+  if (!await userHasCap(user, "loans")) return <Restricted what="loan servicing" />;
 
-  const owning = visiblePrograms(user).find((p) => programType(p.type).caps.includes("loans"));
+  const owning = (await visiblePrograms(user)).find((p) => programType(p.type).caps.includes("loans"));
   if (!owning) return <Restricted what="loan servicing" />;
 
-  const ids = visibleProgramIds(user);
-  const clients = visibleClients(user)
+  const ids = await visibleProgramIds(user);
+  const clients = (await visibleClients(user))
     .map((c) => ({ id: c.id, name: c.first + " " + c.last }))
     .sort((a, b) => a.name.localeCompare(b.name));
   const clientIds = new Set(clients.map((c) => c.id));
 
-  const rows: LoanRow[] = db.select().from(t.loans).all()
+  const rows: LoanRow[] = (await db.select().from(t.loans))
     .filter((l) => ids.has(l.programId))
     .map((l) => ({
       id: l.id,

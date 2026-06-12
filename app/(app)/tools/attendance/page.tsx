@@ -8,16 +8,16 @@ import { AttendanceClient, type Mark } from "./attendance-client";
 
 export default async function AttendancePage() {
   const user = await requireUser();
-  if (!userHasCap(user, "attendance")) return <Restricted what="attendance tools" />;
+  if (!await userHasCap(user, "attendance")) return <Restricted what="attendance tools" />;
 
   // First class belonging to a visible attendance-capable program.
-  const attendanceProgramIds = visiblePrograms(user)
+  const attendanceProgramIds = (await visiblePrograms(user))
     .filter((p) => (programType(p.type).caps as string[]).includes("attendance"))
     .map((p) => p.id);
   const cls = attendanceProgramIds.length
-    ? db.select().from(t.classes)
+    ? (await db.select().from(t.classes)
         .where(inArray(t.classes.programId, attendanceProgramIds))
-        .orderBy(asc(t.classes.id)).all()[0]
+        .orderBy(asc(t.classes.id)))[0]
     : undefined;
   if (!cls) {
     return (
@@ -27,20 +27,20 @@ export default async function AttendancePage() {
     );
   }
 
-  const program = db.select().from(t.programs).where(eq(t.programs.id, cls.programId)).get();
-  const students = db.select().from(t.students)
-    .where(eq(t.students.classId, cls.id)).orderBy(asc(t.students.id)).all();
+  const program = (await db.select().from(t.programs).where(eq(t.programs.id, cls.programId)))[0];
+  const students = await db.select().from(t.students)
+    .where(eq(t.students.classId, cls.id)).orderBy(asc(t.students.id));
 
   // 5 most recent sessions by date, displayed oldest → newest.
-  const sessions = db.select().from(t.classSessions)
-    .where(eq(t.classSessions.classId, cls.id)).all()
+  const sessions = (await db.select().from(t.classSessions)
+    .where(eq(t.classSessions.classId, cls.id)))
     .sort((a, b) => b.date.localeCompare(a.date))
     .slice(0, 5)
     .reverse();
 
   const sessionIds = sessions.map((s) => s.id);
   const markRows = sessionIds.length
-    ? db.select().from(t.attendanceMarks).where(inArray(t.attendanceMarks.sessionId, sessionIds)).all()
+    ? await db.select().from(t.attendanceMarks).where(inArray(t.attendanceMarks.sessionId, sessionIds))
     : [];
   const marks: Record<string, Record<string, Mark>> = {};
   for (const st of students) marks[st.id] = {};

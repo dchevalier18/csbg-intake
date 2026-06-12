@@ -10,40 +10,39 @@ export default async function ServicesPage({ searchParams }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const user = await requireUser();
-  const programs = visiblePrograms(user);
+  const programs = await visiblePrograms(user);
   if (programs.length === 0) return <Restricted what="the service log" />;
 
   const sp = await searchParams;
-  const clients = visibleClients(user);
+  const clients = await visibleClients(user);
 
   // Preselect from ?client= only when that client is actually visible.
   const requested = typeof sp.client === "string" ? sp.client : "";
   const initialClient = clients.some((c) => c.id === requested) ? requested : "";
 
   // Service taxonomy from the services table (active, in sort order).
-  const services = db.select().from(t.services)
+  const services = await db.select().from(t.services)
     .where(eq(t.services.active, 1))
     .orderBy(asc(t.services.sort))
-    .all();
+    ;
   const serviceByCodeDb = new Map(services.map((s) => [s.code, s]));
 
   // Recent entries — scoped to visible programs, newest first, cap 50.
   const programIds = programs.map((p) => p.id);
-  const raw = db.select().from(t.serviceLog)
-    .where(inArray(t.serviceLog.programId, programIds))
-    .all()
+  const raw = (await db.select().from(t.serviceLog)
+    .where(inArray(t.serviceLog.programId, programIds)))
     .sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id)
     .slice(0, 50);
 
   // Lookup maps for display (names may include closed clients; entries are already program-scoped).
   const entryClientIds = [...new Set(raw.map((e) => e.clientId))];
   const entryClients = entryClientIds.length
-    ? db.select({ id: t.clients.id, first: t.clients.first, last: t.clients.last })
-        .from(t.clients).where(inArray(t.clients.id, entryClientIds)).all()
+    ? await db.select({ id: t.clients.id, first: t.clients.first, last: t.clients.last })
+        .from(t.clients).where(inArray(t.clients.id, entryClientIds))
     : [];
   const clientName = new Map(entryClients.map((c) => [c.id, `${c.first} ${c.last}`]));
   const staffInitials = new Map(
-    db.select({ id: t.users.id, initials: t.users.initials }).from(t.users).all().map((u) => [u.id, u.initials]),
+    (await db.select({ id: t.users.id, initials: t.users.initials }).from(t.users)).map((u) => [u.id, u.initials]),
   );
   const programById = new Map(programs.map((p) => [p.id, p]));
 

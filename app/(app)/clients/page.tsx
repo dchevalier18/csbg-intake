@@ -8,16 +8,16 @@ import { ClientsDirectory, type ClientRow } from "./clients-client";
 
 export default async function ClientsPage() {
   const user = await requireUser();
-  const org = getOrg();
-  const base = visibleClients(user);
-  const myPrograms = visiblePrograms(user);
-  const allPrograms = new Map(getPrograms().map((p) => [p.id, p]));
-  const fields = getEnabledIntakeFields();
-  const staff = getStaff();
+  const org = await getOrg();
+  const base = await visibleClients(user);
+  const myPrograms = await visiblePrograms(user);
+  const allPrograms = new Map((await getPrograms()).map((p) => [p.id, p]));
+  const fields = await getEnabledIntakeFields();
+  const staff = await getStaff();
   const caseworkers = staff.filter((s) => s.role === "Case Worker");
 
-  const rows: ClientRow[] = base.map((c) => {
-    const st = fplStatusFor(c.income, c.hhSize, c.fplYear, org.csbgCeiling);
+  const rows: ClientRow[] = await Promise.all(base.map(async (c) => {
+    const st = await fplStatusFor(c.income, c.hhSize, c.fplYear, org.csbgCeiling);
     return {
       id: c.id,
       name: `${c.first} ${c.last}`,
@@ -36,7 +36,7 @@ export default async function ClientsPage() {
       caseworker: staff.find((s) => s.id === c.caseworkerId)?.name ?? "—",
       nextFollowUp: c.nextFollowUp ? shortDate(c.nextFollowUp) : "—",
     };
-  });
+  }));
 
   return (
     <div>

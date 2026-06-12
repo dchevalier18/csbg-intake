@@ -22,19 +22,18 @@ export async function checkDuplicates(first: string, last: string, dob: string):
   const firstPrefix = first.trim().toLowerCase().slice(0, 3);
   const lastLower = last.trim().toLowerCase();
 
-  const memberships = db.select().from(t.clientPrograms).all();
+  const memberships = await db.select().from(t.clientPrograms);
   const byClient = new Map<string, string[]>();
   for (const m of memberships) {
     const arr = byClient.get(m.clientId) ?? [];
     arr.push(m.programId);
     byClient.set(m.clientId, arr);
   }
-  const mine = visibleProgramIds(user);
+  const mine = await visibleProgramIds(user);
 
-  return db
+  return (await db
     .select({ id: t.clients.id, first: t.clients.first, last: t.clients.last, dob: t.clients.dob })
-    .from(t.clients)
-    .all()
+    .from(t.clients))
     .filter((c) =>
       c.last.toLowerCase() === lastLower &&
       (c.first.toLowerCase().startsWith(firstPrefix) || c.dob === dob))
@@ -75,22 +74,22 @@ export async function submitIntake(payload: IntakePayload): Promise<{ ok: false;
     return { ok: false, message: "First name, last name, and date of birth are required." };
   }
   // never trust the client for program visibility — re-check the assignment server-side
-  if (!payload.programId || !userCanSeeProgram(user, payload.programId)) {
+  if (!payload.programId || !await userCanSeeProgram(user, payload.programId)) {
     return { ok: false, message: "You don't have access to enroll clients into that program." };
   }
 
-  const org = getOrg();
-  const active = getActiveFpl(); // NEW intakes always pin the ACTIVE schedule year
+  const org = await getOrg();
+  const active = await getActiveFpl(); // NEW intakes always pin the ACTIVE schedule year
   const hhSize = Math.min(12, Math.max(1, Math.round(Number(payload.hhSize) || 1)));
   const income = Math.max(0, Math.round(Number(payload.income) || 0));
-  const st = fplStatusFor(income, hhSize, active.year, org.csbgCeiling);
+  const st = await fplStatusFor(income, hhSize, active.year, org.csbgCeiling);
 
   // split characteristic answers: builtin field ids are application columns,
   // everything else lands in the `custom` JSON blob
   const builtinText: Record<string, string | null> = {};
   let disability: number | null = null;
   const custom: Record<string, string> = {};
-  for (const fd of getEnabledIntakeFields()) {
+  for (const fd of await getEnabledIntakeFields()) {
     const v = (payload.characteristics[fd.id] ?? "").trim();
     if (fd.builtin === 1) {
       if (fd.id === "disability") disability = v === "" ? null : v === "Yes" ? 1 : 0;
@@ -100,12 +99,12 @@ export async function submitIntake(payload: IntakePayload): Promise<{ ok: false;
     }
   }
 
-  const id = nextApplicationId();
+  const id = await nextApplicationId();
   const portalToken = crypto.randomBytes(8).toString("hex"); // 16 hex chars
   // programs with no document requirements skip straight to review —
   // there is nothing to collect, so the docs stage would be a dead end
-  const reqDocs = requiredDocKeys(payload.programId);
-  db.insert(t.applications).values({
+  const reqDocs = await requiredDocKeys(payload.programId);
+  await db.insert(t.applications).values({
     id,
     first: payload.first.trim(),
     last: payload.last.trim(),
@@ -136,31 +135,31 @@ export async function submitIntake(payload: IntakePayload): Promise<{ ok: false;
         ? "Income-eligible at intake."
         : `⚠ Income above ${org.csbgCeiling}% FPL ceiling — flag for review.`),
     portalToken,
-  }).run();
+  });
 
   // required-document checklist — missing docs don't block intake
   const now = new Date().toISOString();
   for (const docKey of reqDocs) {
-    db.insert(t.applicationDocs).values({
+    await db.insert(t.applicationDocs).values({
       applicationId: id,
       docKey,
       status: payload.docs[docKey] ? "submitted" : "missing",
       source: "staff",
       updatedAt: now,
-    }).run();
+    });
   }
 
   // seminar attendee → in-progress intake link (Tools → Seminars hand-off)
   const attendeeId = Number(payload.seminarAttendeeId);
   if (payload.seminarAttendeeId && Number.isInteger(attendeeId)) {
-    db.update(t.seminarAttendees)
+    await db.update(t.seminarAttendees)
       .set({ intakeStatus: "in-progress", applicationId: id })
       .where(eq(t.seminarAttendees.id, attendeeId))
-      .run();
+      ;
     revalidatePath("/tools/seminars");
   }
 
-  audit(user.id, "application.create", "application", id,
+  await audit(user.id, "application.create", "application", id,
     `${payload.first.trim()} ${payload.last.trim()} → ${payload.programId} (${st.pct}% FPL, ${active.year} guideline)`);
   revalidatePath("/eligibility");
   redirect("/eligibility");
