@@ -11,14 +11,14 @@ const REPORT_MONTH = "2026-05";
 
 export default async function PantryPage() {
   const user = await requireUser();
-  if (!userHasCap(user, "pantry")) return <Restricted what="the pantry network" />;
+  if (!await userHasCap(user, "pantry")) return <Restricted what="the pantry network" />;
 
-  const ids = visibleProgramIds(user);
-  const agencies = db.select().from(t.pantryAgencies).all().filter((a) => ids.has(a.programId));
-  const reports = db.select().from(t.pantryReports).where(eq(t.pantryReports.month, REPORT_MONTH)).all();
+  const ids = await visibleProgramIds(user);
+  const agencies = (await db.select().from(t.pantryAgencies)).filter((a) => ids.has(a.programId));
+  const reports = await db.select().from(t.pantryReports).where(eq(t.pantryReports.month, REPORT_MONTH));
   const byAgency = new Map(reports.map((r) => [r.agencyId, r]));
 
-  const stats = kvGet<ShfbStats>("shfbStats", {
+  const stats = await kvGet<ShfbStats>("shfbStats", {
     agencies: 0, countiesServed: 0, lbsYTD: 0, mealsYTD: 0,
     reportsThisMonth: { received: 0, missing: 0 },
   });

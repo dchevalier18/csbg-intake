@@ -6,8 +6,8 @@ import { UsersClient } from "./users-client";
 
 export default async function UsersSettingsPage() {
   const user = await requireAdmin();
-  const staff = getStaff();
-  const assignments = db.select().from(t.userPrograms).all();
+  const staff = await getStaff();
+  const assignments = await db.select().from(t.userPrograms);
   const users = staff.map((u) => ({
     id: u.id,
     name: u.name,
@@ -16,6 +16,6 @@ export default async function UsersSettingsPage() {
     access: u.access,
     programs: assignments.filter((a) => a.userId === u.id).map((a) => a.programId),
   }));
-  const programs = getPrograms().map((p) => ({ id: p.id, short: p.short, color: p.color }));
+  const programs = (await getPrograms()).map((p) => ({ id: p.id, short: p.short, color: p.color }));
   return <UsersClient users={users} programs={programs} currentUserId={user.id} />;
 }

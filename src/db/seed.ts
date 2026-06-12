@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
+import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import * as t from "./schema";
 import * as schema from "./schema";
 import { SERVICES, FNPIS } from "@/lib/csbg-catalog";
@@ -18,13 +18,13 @@ function hashPassword(password: string): string {
   return `scrypt$${salt}$${hash}`;
 }
 
-type DB = BetterSQLite3Database<typeof schema>;
+type DB = NodePgDatabase<typeof schema>;
 
-export function runSeed(db: DB): void {
+export async function runSeed(db: DB): Promise<void> {
   const now = new Date().toISOString();
 
   // ---------- Organization (CALV defaults — white-labelable in Settings) ----------
-  db.insert(t.organization).values({
+  await db.insert(t.organization).values({
     id: 1,
     name: "Community Action Lehigh Valley",
     short: "CALV",
@@ -34,14 +34,14 @@ export function runSeed(db: DB): void {
     logoMode: "calv",
     fyStart: "October",
     csbgCeiling: 125,
-  }).run();
+  });
 
   // ---------- FPL guideline history (versioned; 2025 active) ----------
-  db.insert(t.fplSchedules).values([
+  await db.insert(t.fplSchedules).values([
     { year: 2023, base: 14580, perAdditional: 5140, effective: "2023-01-19", status: "archived" },
     { year: 2024, base: 15060, perAdditional: 5380, effective: "2024-01-17", status: "archived" },
     { year: 2025, base: 15650, perAdditional: 5500, effective: "2025-01-15", status: "active" },
-  ]).run();
+  ]);
 
   // ---------- Programs (CALV's nine) ----------
   const programs = [
@@ -55,32 +55,32 @@ export function runSeed(db: DB): void {
     { id: "sss",   name: "Sixth Street Shelter",       short: "Sixth Street",    color: "#B5601F", type: "shelter" },
     { id: "wx",    name: "Weatherization",             short: "Weatherization",  color: "#9EC1B0", type: "weatherization" },
   ];
-  db.insert(t.programs).values(programs.map((p, i) => ({
+  await db.insert(t.programs).values(programs.map((p, i) => ({
     ...p,
     sources: programType(p.type).sources.slice(),
     sort: i,
     active: 1,
-  }))).run();
+  })));
 
   // ---------- Users (demo password for all: demo1234) ----------
   const pw = hashPassword("demo1234");
-  db.insert(t.users).values([
+  await db.insert(t.users).values([
     { id: "dr", name: "Dana Rivera",   username: "dana",     passwordHash: pw, role: "Case Worker",     access: "assigned", initials: "DR" },
     { id: "mk", name: "Marcus Kelly",  username: "marcus",   passwordHash: pw, role: "Case Worker",     access: "assigned", initials: "MK" },
     { id: "ls", name: "Luz Santiago",  username: "luz",      passwordHash: pw, role: "Case Worker",     access: "assigned", initials: "LS" },
     { id: "rg", name: "Robin Garcia",  username: "robin",    passwordHash: pw, role: "Front Desk",      access: "assigned", initials: "RG" },
     { id: "jb", name: "Joan Bartos",   username: "joan",     passwordHash: pw, role: "Program Manager", access: "all",      initials: "JB" },
     { id: "tw", name: "Terrence Webb", username: "terrence", passwordHash: pw, role: "Data Admin",      access: "all",      initials: "TW" },
-  ]).run();
-  db.insert(t.userPrograms).values([
+  ]);
+  await db.insert(t.userPrograms).values([
     ...["cad-a", "shfb", "sss", "hc", "rtide"].map((p) => ({ userId: "dr", programId: p })),
     ...["cad-a", "cad-b", "wx", "rtide"].map((p) => ({ userId: "mk", programId: p })),
     ...["cad-a", "cad-b", "gnx", "hc"].map((p) => ({ userId: "ls", programId: p })),
     ...["cad-a", "cad-b"].map((p) => ({ userId: "rg", programId: p })),
-  ]).run();
+  ]);
 
   // ---------- Required documents ----------
-  db.insert(t.docTypes).values([
+  await db.insert(t.docTypes).values([
     { key: "id",        label: "Photo ID (all adults)" },
     { key: "income",    label: "Income proof — 30 days (pay stubs / award letters)" },
     { key: "residency", label: "Proof of residency" },
@@ -89,7 +89,7 @@ export function runSeed(db: DB): void {
     { key: "deed",      label: "Deed or landlord agreement" },
     { key: "custody",   label: "Proof of custody / guardianship" },
     { key: "hmis",      label: "HMIS release of information" },
-  ]).run();
+  ]);
   const programDocs: Record<string, string[]> = {
     "cad-a": ["id", "income", "residency"],
     "cad-b": ["id", "income", "residency"],
@@ -101,9 +101,9 @@ export function runSeed(db: DB): void {
     "sss":   ["id", "income", "residency", "hmis"],
     "wx":    ["id", "income", "residency", "utility", "deed"],
   };
-  db.insert(t.programDocs).values(
+  await db.insert(t.programDocs).values(
     Object.entries(programDocs).flatMap(([programId, keys]) => keys.map((docKey) => ({ programId, docKey }))),
-  ).run();
+  );
 
   // ---------- Answer lists (admin-editable; CSBG 3.0 Section C/D values) ----------
   const lists: Record<string, { label: string; values: string[] }> = {
@@ -118,13 +118,13 @@ export function runSeed(db: DB): void {
     incomeSrc: { label: "Income sources (D13)", values: ["Employment Only", "Employment and Other Income Source", "Employment, Other Source, and Non-Cash Benefits", "Employment and Non-Cash Benefits", "Other Income Source Only", "Other Income Source and Non-Cash Benefits", "No Income", "Non-Cash Benefits Only"] },
     county:    { label: "County / service area", values: ["Lehigh", "Northampton", "Carbon", "Monroe", "Pike", "Wayne", "Other"] },
   };
-  db.insert(t.lists).values(Object.entries(lists).map(([key, l]) => ({ key, label: l.label }))).run();
-  db.insert(t.listValues).values(
+  await db.insert(t.lists).values(Object.entries(lists).map(([key, l]) => ({ key, label: l.label })));
+  await db.insert(t.listValues).values(
     Object.entries(lists).flatMap(([listKey, l]) => l.values.map((value, sort) => ({ listKey, value, sort }))),
-  ).run();
+  );
 
   // ---------- Intake form fields (characteristics step) ----------
-  db.insert(t.intakeFields).values([
+  await db.insert(t.intakeFields).values([
     { id: "sex",        label: "Sex",              code: "C1", type: "list",  listKey: "sex",       enabled: 1, builtin: 1, sort: 0 },
     { id: "race",       label: "Race / ethnicity", code: "C6", type: "list",  listKey: "race",      enabled: 1, builtin: 1, sort: 1 },
     { id: "edu",        label: "Education",        code: "C3", type: "list",  listKey: "edu",       enabled: 1, builtin: 1, sort: 2 },
@@ -132,12 +132,12 @@ export function runSeed(db: DB): void {
     { id: "insurance",  label: "Health insurance", code: "C5", type: "list",  listKey: "insurance", enabled: 1, builtin: 1, sort: 4 },
     { id: "military",   label: "Military status",  code: "C7", type: "list",  listKey: "military",  enabled: 1, builtin: 1, sort: 5 },
     { id: "disability", label: "Disability",       code: "C5", type: "yesno", listKey: null,        enabled: 1, builtin: 1, sort: 6 },
-  ]).run();
+  ]);
 
   // ---------- Service taxonomy (full CSBG 3.0 Module 3 Section A) ----------
-  db.insert(t.services).values(SERVICES.map((s, i) => ({
+  await db.insert(t.services).values(SERVICES.map((s, i) => ({
     code: s.code, domain: s.domain, label: s.label, active: 1, sort: i,
-  }))).run();
+  })));
 
   // ---------- Clients ----------
   const clients = [
@@ -212,10 +212,10 @@ export function runSeed(db: DB): void {
       programs: ["shfb", "wx"], caseworkerId: "dr", enrolled: "2025-01-08", fplYear: 2024,
       flags: [], nextFollowUp: "2026-07-15" },
   ];
-  db.insert(t.clients).values(clients.map(({ programs: _p, ...c }) => ({ ...c, status: "active", createdAt: now }))).run();
-  db.insert(t.clientPrograms).values(
+  await db.insert(t.clients).values(clients.map(({ programs: _p, ...c }) => ({ ...c, status: "active", createdAt: now })));
+  await db.insert(t.clientPrograms).values(
     clients.flatMap((c) => c.programs.map((programId) => ({ clientId: c.id, programId }))),
-  ).run();
+  );
 
   // ---------- Applications (pre-enrollment pipeline) ----------
   const applications = [
@@ -249,17 +249,33 @@ export function runSeed(db: DB): void {
       docs: { id: "verified", income: "verified", residency: "verified" },
       notes: "Income 162% FPL — exceeds CSBG 125% ceiling. Recommend referral to United Way 211." },
   ];
-  db.insert(t.applications).values(applications.map(({ docs: _d, ...a }) => a)).run();
-  db.insert(t.applicationDocs).values(
+  await db.insert(t.applications).values(applications.map(({ docs: _d, ...a }) => a));
+  // Supporting files + verification sign-offs for docs already submitted/verified, so the
+  // review modal shows a full audit trail. One bypass example: Hassan's SSN card was sighted
+  // in person (agency policy prohibits retaining copies), so it was verified without a file.
+  await db.insert(t.applicationDocs).values(
     applications.flatMap((a) =>
-      Object.entries(a.docs).map(([docKey, status]) => ({
-        applicationId: a.id, docKey, status, source: "staff", updatedAt: now,
-      })),
+      Object.entries(a.docs).map(([docKey, status]) => {
+        const bypassed = a.id === "A-1174" && docKey === "ssn";
+        const hasFile = (status === "submitted" || status === "verified") && !bypassed;
+        return {
+          applicationId: a.id, docKey, status, source: "staff", updatedAt: now,
+          ...(hasFile ? {
+            fileName: `${a.last}-${a.first[0]}_${docKey}.pdf`.toLowerCase().replace(/[^a-z0-9._-]/g, ""),
+            fileBy: a.caseworkerId, fileAt: a.applied,
+          } : {}),
+          ...(status === "verified" ? { verifiedBy: a.caseworkerId, verifiedAt: a.applied } : {}),
+          ...(bypassed ? {
+            bypassBy: a.caseworkerId, bypassAt: a.applied,
+            bypassReason: "SSN card sighted in person at intake — agency policy prohibits retaining copies.",
+          } : {}),
+        };
+      }),
     ),
-  ).run();
+  );
 
   // ---------- Service log ----------
-  db.insert(t.serviceLog).values([
+  await db.insert(t.serviceLog).values([
     { date: "2026-06-09", clientId: "C-2389", code: "SDA 1c", programId: "sss",   staffId: "dr", note: "Housing plan check-in; viewed 2 units on Linden St." },
     { date: "2026-06-09", clientId: "C-2417", code: "SRV 5r", programId: "shfb",  staffId: "dr", note: "Monthly distribution box — family of 3." },
     { date: "2026-06-08", clientId: "C-2398", code: "SRV 4e", programId: "cad-b", staffId: "mk", note: "UGI arrears — $214 paid via crisis fund." },
@@ -270,41 +286,57 @@ export function runSeed(db: DB): void {
     { date: "2026-06-05", clientId: "C-2369", code: "SRV 1c", programId: "cad-a", staffId: "mk", note: "Work boots + gloves voucher for orchard season." },
     { date: "2026-06-05", clientId: "C-2435", code: "SRV 5r", programId: "shfb",  staffId: "dr", note: "Senior box + fresh produce." },
     { date: "2026-06-04", clientId: "C-2431", code: "SRV 2q", programId: "cad-a", staffId: "ls", note: "Parenting workshop — session 3 of 6." },
-  ]).run();
+  ]);
 
-  // ---------- FNPI progress (full catalog; FY-to-date demo values on 11) ----------
-  const fnpiValues: Record<string, { served: number; target: number; actual: number }> = {
-    "FNPI 1b": { served: 142,  target: 120,  actual: 96 },
-    "FNPI 1d": { served: 142,  target: 75,   actual: 61 },
-    "FNPI 2b": { served: 612,  target: 540,  actual: 431 },
-    "FNPI 3a": { served: 210,  target: 160,  actual: 148 },
-    "FNPI 3d": { served: 388,  target: 300,  actual: 296 },
-    "FNPI 4a": { served: 301,  target: 280,  actual: 262 },
-    "FNPI 4b": { served: 264,  target: 190,  actual: 151 },
-    "FNPI 4c": { served: 188,  target: 150,  actual: 139 },
-    "FNPI 4f": { served: 96,   target: 90,   actual: 71 },
-    "FNPI 4g": { served: 412,  target: 350,  actual: 344 },
-    "FNPI 5j": { served: 9120, target: 8000, actual: 7634 },
+  // ---------- FNPI targets (full catalog; FY targets on the indicators CALV works) ----------
+  // Targets are at client-level demo scale — served/actual come live from outcome_log.
+  const fnpiTargets: Record<string, number> = {
+    "FNPI 1b": 2,
+    "FNPI 2b": 1,
+    "FNPI 3a": 2,
+    "FNPI 4a": 1,
+    "FNPI 4b": 2,
+    "FNPI 4f": 1,
+    "FNPI 4g": 1,
+    "FNPI 5j": 4,
   };
-  db.insert(t.fnpiProgress).values(FNPIS.map((f) => ({
+  await db.insert(t.fnpiProgress).values(FNPIS.map((f) => ({
     code: f.code,
     label: f.label,
-    served: fnpiValues[f.code]?.served ?? 0,
-    target: fnpiValues[f.code]?.target ?? 0,
-    actual: fnpiValues[f.code]?.actual ?? 0,
-  }))).run();
+    served: 0,
+    target: fnpiTargets[f.code] ?? 0,
+    actual: 0,
+  })));
+
+  // ---------- Outcome log (client-level FNPI recording — feeds Module 3 Section B) ----------
+  await db.insert(t.outcomeLog).values([
+    { date: "2026-03-18", clientId: "C-2417", code: "FNPI 1b", programId: "cad-a", staffId: "dr", status: "working",  note: "Job-readiness workshop complete; search ongoing." },
+    { date: "2026-05-02", clientId: "C-2417", code: "FNPI 5j", programId: "shfb",  staffId: "dr", status: "achieved", note: "Monthly distribution + SNAP enrollment confirmed." },
+    { date: "2026-06-08", clientId: "C-2398", code: "FNPI 4g", programId: "cad-b", staffId: "mk", status: "achieved", note: "UGI arrears cleared via crisis fund — service restored." },
+    { date: "2026-06-06", clientId: "C-2402", code: "FNPI 4f", programId: "wx",    staffId: "mk", status: "achieved", note: "Weatherization job WX-2241 complete — blower-door verified." },
+    { date: "2026-02-08", clientId: "C-2389", code: "FNPI 4a", programId: "sss",   staffId: "dr", status: "achieved", note: "Placed at Sixth Street Shelter on intake." },
+    { date: "2026-04-10", clientId: "C-2389", code: "FNPI 5j", programId: "shfb",  staffId: "dr", status: "achieved", note: "Pantry access established + WIC referral complete." },
+    { date: "2026-05-15", clientId: "C-2431", code: "FNPI 2b", programId: "gnx",   staffId: "ls", status: "achieved", note: "Spring skills assessment passed — Summer Bridge confirmed." },
+    { date: "2026-05-30", clientId: "C-2440", code: "FNPI 2b", programId: "gnx",   staffId: "ls", status: "working",  note: "Robotics module on track — 91% attendance." },
+    { date: "2026-06-07", clientId: "C-2415", code: "FNPI 3a", programId: "hc",    staffId: "dr", status: "achieved", note: "Credit score up 22 points since January." },
+    { date: "2026-06-01", clientId: "C-2415", code: "FNPI 4b", programId: "hc",    staffId: "dr", status: "working",  note: "Homebuyer workshop complete — pre-approval pending." },
+    { date: "2026-04-22", clientId: "C-2422", code: "FNPI 3a", programId: "hc",    staffId: "ls", status: "working",  note: "Budget plan drafted; savings goal set." },
+    { date: "2026-03-12", clientId: "C-2435", code: "FNPI 5j", programId: "shfb",  staffId: "dr", status: "achieved", note: "Senior box program + produce delivery." },
+    { date: "2026-05-12", clientId: "C-2435", code: "FNPI 4f", programId: "wx",    staffId: "mk", status: "working",  note: "Furnace replacement underway — job WX-2248." },
+    { date: "2026-06-05", clientId: "C-2369", code: "FNPI 1b", programId: "cad-a", staffId: "mk", status: "achieved", note: "Work-gear voucher issued; orchard placement secured." },
+  ]);
 
   // ---------- Integrations ----------
-  db.insert(t.integrations).values([
+  await db.insert(t.integrations).values([
     { id: "rxoffice", name: "RX Office", kind: "API", status: "connected", lastSync: "Today 6:00 AM", records: "4,212 clients", detail: "Housing counseling CMS — nightly two-way sync" },
     { id: "hancock", name: "Hancock", kind: "API", status: "connected", lastSync: "Today 6:00 AM", records: "1,876 energy cases", detail: "Weatherization / LIHEAP case data" },
     { id: "hmis", name: "HMIS (PA-503)", kind: "API", status: "attention", lastSync: "Jun 6, 11:40 PM", records: "912 shelter records", detail: "Eastern PA CoC — 14 records failed de-dup, needs review" },
     { id: "cap60", name: "CAP60", kind: "Import", status: "connected", lastSync: "Jun 1", records: "FY25 archive", detail: "Legacy CSBG system — historical import complete" },
     { id: "sheets", name: "Spreadsheet import", kind: "CSV / XLSX", status: "ready", lastSync: "Jun 8", records: "3 templates", detail: "Pantry aggregates, seminar sign-ins, volunteer hours" },
-  ]).run();
+  ]);
 
   // ---------- Agency-wide aggregates (history predating this system) ----------
-  db.insert(t.kv).values([
+  await db.insert(t.kv).values([
     { key: "agency", value: { individualsServed: 18244, householdsServed: 7491, newThisFY: 3120 } },
     { key: "srvByDomain", value: [
       { domain: "hn",  count: 11240 }, { domain: "hou", count: 3180 },
@@ -319,14 +351,14 @@ export function runSeed(db: DB): void {
     { key: "volStats", value: { totalHoursFY: 11840, lowIncomeHoursFY: 4120, activeVolunteers: 386 } },
     { key: "matching", value: { auto: 6988, staff: 312, awaiting: 14, silent: 0 } },
     { key: "wxStats", value: { unitsCompletedFY: 96, avgDaysAuditToQc: 38 } },
-  ]).run();
+  ]);
 
   /* ---------- Program tools ---------- */
 
   // Generation Next — classroom attendance
-  db.insert(t.classes).values([
+  await db.insert(t.classes).values([
     { id: "gnx-summer-bridge", programId: "gnx", name: "Summer Bridge — Robotics & Life Skills", site: "Allentown YMCA, Room 204", schedule: "Mon–Thu · 3:30–5:30 PM", srvCode: "SRV 2h" },
-  ]).run();
+  ]);
   const gnxStudents = [
     { id: "G-101", name: "Dariel Vásquez", clientId: "C-2440", grade: "11th", school: "Liberty HS",   termPct: 91, marks: ["p", "p", "a", "p", null] },
     { id: "G-102", name: "Keily Rosario",  clientId: null,     grade: "10th", school: "Allen HS",     termPct: 96, marks: ["p", "p", "p", "p", null] },
@@ -337,7 +369,7 @@ export function runSeed(db: DB): void {
     { id: "G-107", name: "Ethan Yoder",    clientId: null,     grade: "9th",  school: "Northeast MS", termPct: 93, marks: ["p", "p", "e", "p", null] },
     { id: "G-108", name: "Amara Diop",     clientId: null,     grade: "11th", school: "Dieruff HS",   termPct: 97, marks: ["p", "p", "p", "p", null] },
   ];
-  db.insert(t.students).values(gnxStudents.map(({ marks: _m, ...s }) => ({ ...s, classId: "gnx-summer-bridge" }))).run();
+  await db.insert(t.students).values(gnxStudents.map(({ marks: _m, ...s }) => ({ ...s, classId: "gnx-summer-bridge" })));
   const sessions = [
     { id: "s1", date: "2026-06-02", label: "Jun 2", posted: 1 },
     { id: "s2", date: "2026-06-03", label: "Jun 3", posted: 1 },
@@ -345,26 +377,26 @@ export function runSeed(db: DB): void {
     { id: "s4", date: "2026-06-08", label: "Jun 8", posted: 1 },
     { id: "s5", date: "2026-06-09", label: "Jun 9", posted: 0 },
   ];
-  db.insert(t.classSessions).values(sessions.map((s) => ({ ...s, classId: "gnx-summer-bridge" }))).run();
-  db.insert(t.attendanceMarks).values(
+  await db.insert(t.classSessions).values(sessions.map((s) => ({ ...s, classId: "gnx-summer-bridge" })));
+  await db.insert(t.attendanceMarks).values(
     gnxStudents.flatMap((st) => sessions.map((sess, i) => ({ sessionId: sess.id, studentId: st.id, mark: st.marks[i] }))),
-  ).run();
+  );
 
   // Weatherization — contractors & jobs
-  db.insert(t.contractors).values([
+  await db.insert(t.contractors).values([
     { id: "W-01", programId: "wx", name: "Keystone Insulation Co.",   trade: "Insulation / air sealing", crews: 3, phone: "(610) 555-0201", insuranceExp: "2027-02-15", bpiExp: "2026-11-30", epaRrpExp: "2027-08-01", qcPass: 97 },
     { id: "W-02", programId: "wx", name: "Lehigh HVAC Partners",      trade: "Heating systems",          crews: 2, phone: "(610) 555-0233", insuranceExp: "2026-07-08", bpiExp: "2027-03-22", epaRrpExp: "2026-12-15", qcPass: 94 },
     { id: "W-03", programId: "wx", name: "Valley Window & Door",      trade: "Windows / doors",          crews: 1, phone: "(484) 555-0260", insuranceExp: "2027-01-20", bpiExp: "2026-06-30", epaRrpExp: "2027-05-10", qcPass: 91 },
     { id: "W-04", programId: "wx", name: "Pocono Energy Audits LLC",  trade: "Audits / blower door",     crews: 2, phone: "(570) 555-0274", insuranceExp: "2027-04-02", bpiExp: "2027-09-18", epaRrpExp: "2027-02-28", qcPass: 99 },
-  ]).run();
-  db.insert(t.wxJobs).values([
+  ]);
+  await db.insert(t.wxJobs).values([
     { id: "WX-2241", programId: "wx", clientName: "Walter Gergar",   clientId: "C-2402", address: "212 Delaware Ave, Bangor",    stage: "complete", contractorId: "W-01", funding: "DOE WAP",            measures: "Attic insulation, air sealing, CO detectors", started: "2026-04-21" },
     { id: "WX-2248", programId: "wx", clientName: "Gene Kovach",     clientId: "C-2435", address: "23 Broadway, Bangor",         stage: "qc",       contractorId: "W-02", funding: "LIHEAP Crisis",      measures: "Furnace replacement, smart thermostat", started: "2026-05-12" },
     { id: "WX-2252", programId: "wx", clientName: "Ana Reyes",       clientId: null,     address: "731 N 7th St, Allentown",     stage: "install",  contractorId: "W-01", funding: "DOE WAP",            measures: "Dense-pack walls, basement rim joist", started: "2026-05-26" },
     { id: "WX-2255", programId: "wx", clientName: "Earl Frantz",     clientId: null,     address: "44 Mauch Chunk St, Nazareth", stage: "install",  contractorId: "W-03", funding: "UGI partnership",    measures: "Window replacement (6), door sweep", started: "2026-06-01" },
     { id: "WX-2257", programId: "wx", clientName: "Marisol Núñez",   clientId: null,     address: "912 Ferry St, Easton",        stage: "audit",    contractorId: "W-04", funding: "DOE WAP",            measures: "Initial audit + blower door scheduled 6/12", started: "2026-06-08" },
     { id: "WX-2258", programId: "wx", clientName: "Kateryna Bondar", clientId: null,     address: "305 Tilghman St, Allentown",  stage: "audit",    contractorId: "W-04", funding: "Pending eligibility", measures: "Audit blocked — awaiting landlord agreement (see eligibility queue)", started: "2026-06-08" },
-  ]).run();
+  ]);
 
   // Second Harvest — pantry member agencies + May reports
   const agencies = [
@@ -375,43 +407,43 @@ export function runSeed(db: DB): void {
     { id: "P-040", name: "Carbon County Friendship Pantry",   town: "Jim Thorpe",  county: "Carbon",      contact: "L. Gable",     phone: "(570) 555-0351", compliance: "site-visit-due", may: { status: "missing", households: null, lbs: null } },
     { id: "P-027", name: "Monroe Mobile Pantry",              town: "Stroudsburg", county: "Monroe",      contact: "T. Nguyen",    phone: "(570) 555-0368", compliance: "current",        may: { status: "received", households: 288, lbs: 12480 } },
   ];
-  db.insert(t.pantryAgencies).values(agencies.map(({ may: _m, ...a }) => ({ ...a, programId: "shfb" }))).run();
-  db.insert(t.pantryReports).values(agencies.map((a) => ({
+  await db.insert(t.pantryAgencies).values(agencies.map(({ may: _m, ...a }) => ({ ...a, programId: "shfb" })));
+  await db.insert(t.pantryReports).values(agencies.map((a) => ({
     agencyId: a.id, month: "2026-05", status: a.may.status, households: a.may.households, lbs: a.may.lbs,
-  }))).run();
+  })));
 
   // Housing Counseling — seminars
-  db.insert(t.seminars).values([
+  await db.insert(t.seminars).values([
     { id: "SEM-18", programId: "hc", title: "First-Time Homebuyer Workshop",   date: "2026-06-14", time: "9:00 AM – 1:00 PM",   site: "CALV Main Office, Allentown",      capacity: 30, registered: 26, srvCode: "SRV 3a" },
     { id: "SEM-19", programId: "hc", title: "Foreclosure Prevention Clinic",   date: "2026-06-21", time: "6:00 – 8:00 PM",      site: "Bethlehem Area Public Library",    capacity: 20, registered: 11, srvCode: "SRV 3a" },
     { id: "SEM-20", programId: "hc", title: "Renter Rights & Eviction Defense", date: "2026-06-28", time: "10:00 AM – 12:00 PM", site: "Easton Community Center",          capacity: 25, registered: 19, srvCode: "SRV 4d" },
-  ]).run();
-  db.insert(t.seminarAttendees).values([
+  ]);
+  await db.insert(t.seminarAttendees).values([
     { seminarId: "SEM-18", name: "Rosa Mejía",     applicationId: "A-1186", clientId: null,     intakeStatus: "in-progress" },
     { seminarId: "SEM-18", name: "Priya Raman",    applicationId: null,     clientId: "C-2415", intakeStatus: "enrolled" },
     { seminarId: "SEM-18", name: "Jordan Wells",   applicationId: null,     clientId: null,     intakeStatus: "not-started" },
     { seminarId: "SEM-18", name: "Fatima Al-Sayed", applicationId: null,    clientId: null,     intakeStatus: "not-started" },
-  ]).run();
+  ]);
 
   // CA Homes — construction projects
-  db.insert(t.projects).values([
+  await db.insert(t.projects).values([
     { id: "H-07", programId: "homes", name: "417 N Jordan St — full rehab", town: "Allentown", buyer: "Matched — Ortega family (C-2417 waitlist)", budget: 218000, spent: 164000, pct: 74 },
     { id: "H-08", programId: "homes", name: "622 Pawnee St — new build",    town: "Bethlehem", buyer: "Buyer pool — 3 pre-approved",               budget: 264000, spent: 71000,  pct: 27 },
-  ]).run();
+  ]);
   const h7 = ["Acquisition & title|1|0", "Permits (City of Allentown)|1|0", "Structural & roof|1|0", "MEP rough-in|1|0", "Insulation & drywall|0|1", "Finishes & appliances|0|0", "Final inspection / CO|0|0", "Settlement|0|0"];
   const h8 = ["Lot acquisition|1|0", "Permits (City of Bethlehem)|1|0", "Foundation|1|0", "Framing|0|1", "MEP rough-in|0|0", "Insulation & drywall|0|0", "Finishes|0|0", "Final inspection / CO|0|0", "Settlement|0|0"];
-  db.insert(t.projectMilestones).values([
+  await db.insert(t.projectMilestones).values([
     ...h7.map((m, i) => { const [label, done, current] = m.split("|"); return { projectId: "H-07", label, done: Number(done), current: Number(current), sort: i }; }),
     ...h8.map((m, i) => { const [label, done, current] = m.split("|"); return { projectId: "H-08", label, done: Number(done), current: Number(current), sort: i }; }),
-  ]).run();
-  db.insert(t.projectRequirements).values([
+  ]);
+  await db.insert(t.projectRequirements).values([
     { projectId: "H-07", label: "Davis-Bacon payroll certs (HOME funds)", status: "current" },
     { projectId: "H-07", label: "Lead-safe certification (pre-1978)",     status: "current" },
     { projectId: "H-07", label: "Section 3 hiring report — Q2",           status: "due" },
     { projectId: "H-08", label: "NEPA environmental review",              status: "current" },
     { projectId: "H-08", label: "Energy Star v3.2 verification plan",     status: "current" },
     { projectId: "H-08", label: "CDBG draw #2 documentation",             status: "due" },
-  ]).run();
+  ]);
 
   // Volunteers (Module 2, B.1 — low-income split)
   const vols = [
@@ -422,13 +454,13 @@ export function runSeed(db: DB): void {
     { id: "V-198", name: "Pat Donchez",      clientId: null,     lowIncome: 0, role: "Build crew",           hoursFY: 122, lastShift: "2026-06-08", programs: ["homes"] },
     { id: "V-225", name: "Sofia Marrero",    clientId: null,     lowIncome: 1, role: "Tutoring",             hoursFY: 27,  lastShift: "2026-06-03", programs: ["gnx"] },
   ];
-  db.insert(t.volunteers).values(vols.map(({ programs: _p, ...v }) => v)).run();
-  db.insert(t.volunteerPrograms).values(
+  await db.insert(t.volunteers).values(vols.map(({ programs: _p, ...v }) => v));
+  await db.insert(t.volunteerPrograms).values(
     vols.flatMap((v) => v.programs.map((programId) => ({ volunteerId: v.id, programId }))),
-  ).run();
+  );
 
   // Rising Tide — loan portfolio
-  db.insert(t.loans).values([
+  await db.insert(t.loans).values([
     { id: "L-3041", programId: "rtide", borrower: "Hassan Farah",   clientId: null,     purpose: "Halal food truck — equipment & buildout",       principal: 18000, balance: 12480, rate: "4.5%", term: "48 mo", status: "current", nextDue: "2026-06-20" },
     { id: "L-3028", programId: "rtide", borrower: "Priya Raman",    clientId: "C-2415", purpose: "Home daycare — licensing & supplies",           principal: 9500,  balance: 3120,  rate: "4.0%", term: "36 mo", status: "current", nextDue: "2026-06-18" },
     { id: "L-3015", programId: "rtide", borrower: "Marcus Okonkwo", clientId: null,     purpose: "Barbershop chair rental + tools",               principal: 6000,  balance: 5400,  rate: "5.0%", term: "24 mo", status: "late",    nextDue: "2026-05-25" },
@@ -436,5 +468,5 @@ export function runSeed(db: DB): void {
     { id: "L-3052", programId: "rtide", borrower: "Dwayne Ellis",   clientId: null,     purpose: "Mobile auto-detailing startup",                 principal: 11000, balance: 10670, rate: "4.5%", term: "48 mo", status: "current", nextDue: "2026-06-28" },
     { id: "L-3009", programId: "rtide", borrower: "Aisha Rahman",   clientId: null,     purpose: "Catering business — commercial kitchen deposit", principal: 14500, balance: 8990, rate: "4.0%", term: "42 mo", status: "current", nextDue: "2026-06-15" },
     { id: "L-2978", programId: "rtide", borrower: "Tomás Delgado",  clientId: null,     purpose: "Landscaping equipment",                          principal: 8800, balance: 1450,  rate: "5.0%", term: "36 mo", status: "late",    nextDue: "2026-05-30" },
-  ]).run();
+  ]);
 }

@@ -12,18 +12,18 @@ interface WxStats { unitsCompletedFY: number; avgDaysAuditToQc: number }
 
 export default async function WeatherizationPage() {
   const user = await requireUser();
-  if (!userHasCap(user, "contractors")) return <Restricted what="weatherization tools" />;
+  if (!await userHasCap(user, "contractors")) return <Restricted what="weatherization tools" />;
 
-  const wxProgramIds = visiblePrograms(user)
+  const wxProgramIds = (await visiblePrograms(user))
     .filter((p) => (programType(p.type).caps as string[]).includes("contractors"))
     .map((p) => p.id);
   const jobs = wxProgramIds.length
-    ? db.select().from(t.wxJobs).where(inArray(t.wxJobs.programId, wxProgramIds)).orderBy(asc(t.wxJobs.id)).all()
+    ? await db.select().from(t.wxJobs).where(inArray(t.wxJobs.programId, wxProgramIds)).orderBy(asc(t.wxJobs.id))
     : [];
   const contractors = wxProgramIds.length
-    ? db.select().from(t.contractors).where(inArray(t.contractors.programId, wxProgramIds)).orderBy(asc(t.contractors.id)).all()
+    ? await db.select().from(t.contractors).where(inArray(t.contractors.programId, wxProgramIds)).orderBy(asc(t.contractors.id))
     : [];
-  const stats = kvGet<WxStats>("wxStats", { unitsCompletedFY: 0, avgDaysAuditToQc: 0 });
+  const stats = await kvGet<WxStats>("wxStats", { unitsCompletedFY: 0, avgDaysAuditToQc: 0 });
 
   // Credentials expiring within 60 days of today.
   const cutoffDate = new Date(todayIso() + "T12:00:00");

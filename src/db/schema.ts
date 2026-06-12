@@ -1,12 +1,12 @@
-import { sqliteTable, text, integer, primaryKey } from "drizzle-orm/sqlite-core";
+import { pgTable, text, integer, jsonb, primaryKey } from "drizzle-orm/pg-core";
 
 /* ============================================================
-   CSBG Client Intake System — database schema (SQLite / Drizzle)
+   CSBG Client Intake System — database schema (PostgreSQL / Drizzle)
    Dates are ISO strings ("YYYY-MM-DD"); timestamps are ISO datetime.
    ============================================================ */
 
 // ---------- Organization (single row, id = 1) — white-label config ----------
-export const organization = sqliteTable("organization", {
+export const organization = pgTable("organization", {
   id: integer("id").primaryKey(),
   name: text("name").notNull(),
   short: text("short").notNull(),
@@ -20,7 +20,7 @@ export const organization = sqliteTable("organization", {
 });
 
 // ---------- Users, sessions, program assignment ----------
-export const users = sqliteTable("users", {
+export const users = pgTable("users", {
   id: text("id").primaryKey(),                  // short slug, e.g. "dr"
   name: text("name").notNull(),
   username: text("username").notNull().unique(),
@@ -31,42 +31,42 @@ export const users = sqliteTable("users", {
   active: integer("active").notNull().default(1),
 });
 
-export const userPrograms = sqliteTable("user_programs", {
+export const userPrograms = pgTable("user_programs", {
   userId: text("user_id").notNull(),
   programId: text("program_id").notNull(),
 }, (t) => [primaryKey({ columns: [t.userId, t.programId] })]);
 
-export const sessions = sqliteTable("sessions", {
+export const sessions = pgTable("sessions", {
   token: text("token").primaryKey(),
   userId: text("user_id").notNull(),
   expiresAt: text("expires_at").notNull(),
 });
 
 // ---------- Programs (configured per agency; type activates tools) ----------
-export const programs = sqliteTable("programs", {
+export const programs = pgTable("programs", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   short: text("short").notNull(),
   color: text("color").notNull(),
   type: text("type").notNull(),                 // program-type id from src/lib/program-types.ts
-  sources: text("sources", { mode: "json" }).$type<string[]>().notNull().default([]),
+  sources: jsonb("sources").$type<string[]>().notNull().default([]),
   sort: integer("sort").notNull().default(0),
   active: integer("active").notNull().default(1),
 });
 
 // ---------- Required documents ----------
-export const docTypes = sqliteTable("doc_types", {
+export const docTypes = pgTable("doc_types", {
   key: text("key").primaryKey(),
   label: text("label").notNull(),
 });
 
-export const programDocs = sqliteTable("program_docs", {
+export const programDocs = pgTable("program_docs", {
   programId: text("program_id").notNull(),
   docKey: text("doc_key").notNull(),
 }, (t) => [primaryKey({ columns: [t.programId, t.docKey] })]);
 
 // ---------- Clients (enrolled) ----------
-export const clients = sqliteTable("clients", {
+export const clients = pgTable("clients", {
   id: text("id").primaryKey(),                  // "C-2417"
   first: text("first").notNull(),
   last: text("last").notNull(),
@@ -90,20 +90,20 @@ export const clients = sqliteTable("clients", {
   enrolled: text("enrolled").notNull(),         // date of first enrollment
   fplYear: integer("fpl_year").notNull(),       // pinned guideline year (point-in-time integrity)
   nextFollowUp: text("next_follow_up"),
-  flags: text("flags", { mode: "json" }).$type<string[]>().notNull().default([]),
-  custom: text("custom", { mode: "json" }).$type<Record<string, string>>().notNull().default({}),
+  flags: jsonb("flags").$type<string[]>().notNull().default([]),
+  custom: jsonb("custom").$type<Record<string, string>>().notNull().default({}),
   status: text("status").notNull().default("active"), // 'active' | 'closed'
   createdAt: text("created_at").notNull(),
 });
 
-export const clientPrograms = sqliteTable("client_programs", {
+export const clientPrograms = pgTable("client_programs", {
   clientId: text("client_id").notNull(),
   programId: text("program_id").notNull(),
 }, (t) => [primaryKey({ columns: [t.clientId, t.programId] })]);
 
 // ---------- Applications (pre-enrollment eligibility pipeline) ----------
 // stage: 'docs' → 'review' → 'decision' → terminal 'approved' | 'denied'
-export const applications = sqliteTable("applications", {
+export const applications = pgTable("applications", {
   id: text("id").primaryKey(),                  // "A-1180"
   first: text("first").notNull(),
   last: text("last").notNull(),
@@ -123,7 +123,7 @@ export const applications = sqliteTable("applications", {
   housing: text("housing"),
   income: integer("income").notNull().default(0),
   incomeSrc: text("income_src"),
-  custom: text("custom", { mode: "json" }).$type<Record<string, string>>().notNull().default({}),
+  custom: jsonb("custom").$type<Record<string, string>>().notNull().default({}),
   programId: text("program_id").notNull(),
   caseworkerId: text("caseworker_id"),
   stage: text("stage").notNull().default("docs"),
@@ -137,16 +137,28 @@ export const applications = sqliteTable("applications", {
   portalToken: text("portal_token").unique(),   // tokenized self-service link (no login wall)
 });
 
-export const applicationDocs = sqliteTable("application_docs", {
+export const applicationDocs = pgTable("application_docs", {
   applicationId: text("application_id").notNull(),
   docKey: text("doc_key").notNull(),
   status: text("status").notNull().default("missing"), // 'missing' | 'submitted' | 'verified'
   source: text("source"),                                // 'staff' | 'portal'
   updatedAt: text("updated_at"),
+  // supporting file on record (scanned document) — required before plain Verify
+  fileName: text("file_name"),                           // original filename, shown in the meta line
+  filePath: text("file_path"),                           // stored copy, relative to data/uploads/
+  fileBy: text("file_by"),
+  fileAt: text("file_at"),                               // ISO date
+  // verification sign-off
+  verifiedBy: text("verified_by"),
+  verifiedAt: text("verified_at"),                       // ISO date
+  // signed exception — verified with no document retained (audited)
+  bypassBy: text("bypass_by"),
+  bypassAt: text("bypass_at"),                           // ISO date
+  bypassReason: text("bypass_reason"),
 }, (t) => [primaryKey({ columns: [t.applicationId, t.docKey] })]);
 
 // ---------- Service taxonomy + log ----------
-export const services = sqliteTable("services", {
+export const services = pgTable("services", {
   code: text("code").primaryKey(),              // "SRV 4e"
   domain: text("domain").notNull(),             // domain id: sda|emp|edu|inc|hou|hn|civ|tra
   label: text("label").notNull(),
@@ -154,8 +166,8 @@ export const services = sqliteTable("services", {
   sort: integer("sort").notNull().default(0),
 });
 
-export const serviceLog = sqliteTable("service_log", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const serviceLog = pgTable("service_log", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   date: text("date").notNull(),
   clientId: text("client_id").notNull(),
   code: text("code").notNull(),
@@ -165,7 +177,7 @@ export const serviceLog = sqliteTable("service_log", {
 });
 
 // ---------- Federal Poverty Guidelines (versioned, point-in-time pinning) ----------
-export const fplSchedules = sqliteTable("fpl_schedules", {
+export const fplSchedules = pgTable("fpl_schedules", {
   year: integer("year").primaryKey(),
   base: integer("base").notNull(),              // household of 1, annual $
   perAdditional: integer("per_additional").notNull(),
@@ -174,19 +186,19 @@ export const fplSchedules = sqliteTable("fpl_schedules", {
 });
 
 // ---------- Admin-editable answer lists + intake fields ----------
-export const lists = sqliteTable("lists", {
+export const lists = pgTable("lists", {
   key: text("key").primaryKey(),                // 'sex' | 'race' | ...
   label: text("label").notNull(),
 });
 
-export const listValues = sqliteTable("list_values", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const listValues = pgTable("list_values", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   listKey: text("list_key").notNull(),
   value: text("value").notNull(),
   sort: integer("sort").notNull().default(0),
 });
 
-export const intakeFields = sqliteTable("intake_fields", {
+export const intakeFields = pgTable("intake_fields", {
   id: text("id").primaryKey(),
   label: text("label").notNull(),
   code: text("code").notNull().default(""),     // CSBG code, e.g. "C6"
@@ -198,8 +210,11 @@ export const intakeFields = sqliteTable("intake_fields", {
   sort: integer("sort").notNull().default(0),
 });
 
-// ---------- FNPI outcomes (FY rollup) ----------
-export const fnpiProgress = sqliteTable("fnpi_progress", {
+// ---------- FNPI outcomes ----------
+// fnpi_progress holds the FY TARGETS per indicator. served/actual are a pre-system
+// baseline (0 in a fresh seed); the reports rollup layers live outcome_log counts on
+// top of them, so existing databases keep their historical aggregates.
+export const fnpiProgress = pgTable("fnpi_progress", {
   code: text("code").primaryKey(),              // "FNPI 4b"
   label: text("label").notNull(),
   served: integer("served").notNull().default(0),
@@ -207,8 +222,21 @@ export const fnpiProgress = sqliteTable("fnpi_progress", {
   actual: integer("actual").notNull().default(0),
 });
 
+// Client-level outcome recording — one row per client × indicator × FY
+// (the recording action upserts within the fiscal year, so counts stay unduplicated).
+export const outcomeLog = pgTable("outcome_log", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  date: text("date").notNull(),
+  clientId: text("client_id").notNull(),
+  code: text("code").notNull(),                 // "FNPI 4b"
+  programId: text("program_id").notNull(),
+  staffId: text("staff_id").notNull(),
+  status: text("status").notNull().default("achieved"), // 'working' | 'achieved'
+  note: text("note").notNull().default(""),
+});
+
 // ---------- Integrations ----------
-export const integrations = sqliteTable("integrations", {
+export const integrations = pgTable("integrations", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   kind: text("kind").notNull(),                 // 'API' | 'Import' | 'CSV / XLSX'
@@ -218,9 +246,22 @@ export const integrations = sqliteTable("integrations", {
   detail: text("detail").notNull().default(""),
 });
 
+// Spreadsheet import history (Data & integrations → Import spreadsheet)
+export const importJobs = pgTable("import_jobs", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  at: text("at").notNull(),                     // ISO datetime
+  template: text("template").notNull(),         // 'pantry' | 'seminars' | 'volunteers'
+  filename: text("filename").notNull(),
+  imported: integer("imported").notNull().default(0),
+  updated: integer("updated").notNull().default(0),
+  skipped: integer("skipped").notNull().default(0),
+  staffId: text("staff_id").notNull(),
+  detail: text("detail").notNull().default(""),
+});
+
 // ---------- Audit log ----------
-export const auditLog = sqliteTable("audit_log", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const auditLog = pgTable("audit_log", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   at: text("at").notNull(),                     // ISO datetime
   userId: text("user_id"),
   action: text("action").notNull(),             // e.g. 'application.approve', 'fpl.publish'
@@ -230,9 +271,9 @@ export const auditLog = sqliteTable("audit_log", {
 });
 
 // ---------- Misc demo aggregates (agency-wide stats that predate this system) ----------
-export const kv = sqliteTable("kv", {
+export const kv = pgTable("kv", {
   key: text("key").primaryKey(),
-  value: text("value", { mode: "json" }).$type<unknown>().notNull(),
+  value: jsonb("value").$type<unknown>().notNull(),
 });
 
 /* ============================================================
@@ -240,7 +281,7 @@ export const kv = sqliteTable("kv", {
    ============================================================ */
 
 // --- attendance (youth/education) ---
-export const classes = sqliteTable("classes", {
+export const classes = pgTable("classes", {
   id: text("id").primaryKey(),
   programId: text("program_id").notNull(),
   name: text("name").notNull(),
@@ -249,7 +290,7 @@ export const classes = sqliteTable("classes", {
   srvCode: text("srv_code").notNull().default("SRV 2h"),
 });
 
-export const students = sqliteTable("students", {
+export const students = pgTable("students", {
   id: text("id").primaryKey(),
   classId: text("class_id").notNull(),
   name: text("name").notNull(),
@@ -259,7 +300,7 @@ export const students = sqliteTable("students", {
   termPct: integer("term_pct").notNull().default(100),
 });
 
-export const classSessions = sqliteTable("class_sessions", {
+export const classSessions = pgTable("class_sessions", {
   id: text("id").primaryKey(),
   classId: text("class_id").notNull(),
   date: text("date").notNull(),
@@ -267,14 +308,14 @@ export const classSessions = sqliteTable("class_sessions", {
   posted: integer("posted").notNull().default(0),
 });
 
-export const attendanceMarks = sqliteTable("attendance_marks", {
+export const attendanceMarks = pgTable("attendance_marks", {
   sessionId: text("session_id").notNull(),
   studentId: text("student_id").notNull(),
   mark: text("mark"),                           // 'p' | 'a' | 'e' | null
 }, (t) => [primaryKey({ columns: [t.sessionId, t.studentId] })]);
 
 // --- contractors / jobs (weatherization) ---
-export const contractors = sqliteTable("contractors", {
+export const contractors = pgTable("contractors", {
   id: text("id").primaryKey(),
   programId: text("program_id").notNull(),
   name: text("name").notNull(),
@@ -287,7 +328,7 @@ export const contractors = sqliteTable("contractors", {
   qcPass: integer("qc_pass").notNull().default(100),
 });
 
-export const wxJobs = sqliteTable("wx_jobs", {
+export const wxJobs = pgTable("wx_jobs", {
   id: text("id").primaryKey(),
   programId: text("program_id").notNull(),
   clientName: text("client_name").notNull(),
@@ -301,7 +342,7 @@ export const wxJobs = sqliteTable("wx_jobs", {
 });
 
 // --- pantry network (food bank) ---
-export const pantryAgencies = sqliteTable("pantry_agencies", {
+export const pantryAgencies = pgTable("pantry_agencies", {
   id: text("id").primaryKey(),
   programId: text("program_id").notNull(),
   name: text("name").notNull(),
@@ -312,8 +353,8 @@ export const pantryAgencies = sqliteTable("pantry_agencies", {
   compliance: text("compliance").notNull().default("current"), // 'current' | 'site-visit-due'
 });
 
-export const pantryReports = sqliteTable("pantry_reports", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const pantryReports = pgTable("pantry_reports", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   agencyId: text("agency_id").notNull(),
   month: text("month").notNull(),               // "2026-05"
   status: text("status").notNull().default("missing"), // 'received' | 'missing'
@@ -322,7 +363,7 @@ export const pantryReports = sqliteTable("pantry_reports", {
 });
 
 // --- seminars (housing counseling) ---
-export const seminars = sqliteTable("seminars", {
+export const seminars = pgTable("seminars", {
   id: text("id").primaryKey(),
   programId: text("program_id").notNull(),
   title: text("title").notNull(),
@@ -334,8 +375,8 @@ export const seminars = sqliteTable("seminars", {
   srvCode: text("srv_code").notNull().default("SRV 3a"),
 });
 
-export const seminarAttendees = sqliteTable("seminar_attendees", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const seminarAttendees = pgTable("seminar_attendees", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   seminarId: text("seminar_id").notNull(),
   name: text("name").notNull(),
   clientId: text("client_id"),
@@ -344,7 +385,7 @@ export const seminarAttendees = sqliteTable("seminar_attendees", {
 });
 
 // --- construction projects (housing construction) ---
-export const projects = sqliteTable("projects", {
+export const projects = pgTable("projects", {
   id: text("id").primaryKey(),
   programId: text("program_id").notNull(),
   name: text("name").notNull(),
@@ -355,8 +396,8 @@ export const projects = sqliteTable("projects", {
   pct: integer("pct").notNull().default(0),
 });
 
-export const projectMilestones = sqliteTable("project_milestones", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const projectMilestones = pgTable("project_milestones", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   projectId: text("project_id").notNull(),
   label: text("label").notNull(),
   done: integer("done").notNull().default(0),
@@ -364,15 +405,15 @@ export const projectMilestones = sqliteTable("project_milestones", {
   sort: integer("sort").notNull().default(0),
 });
 
-export const projectRequirements = sqliteTable("project_requirements", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const projectRequirements = pgTable("project_requirements", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   projectId: text("project_id").notNull(),
   label: text("label").notNull(),
   status: text("status").notNull().default("current"), // 'current' | 'due'
 });
 
 // --- volunteers (outreach / food bank) ---
-export const volunteers = sqliteTable("volunteers", {
+export const volunteers = pgTable("volunteers", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   clientId: text("client_id"),
@@ -382,13 +423,13 @@ export const volunteers = sqliteTable("volunteers", {
   lastShift: text("last_shift"),
 });
 
-export const volunteerPrograms = sqliteTable("volunteer_programs", {
+export const volunteerPrograms = pgTable("volunteer_programs", {
   volunteerId: text("volunteer_id").notNull(),
   programId: text("program_id").notNull(),
 }, (t) => [primaryKey({ columns: [t.volunteerId, t.programId] })]);
 
 // --- loans (community loan fund) ---
-export const loans = sqliteTable("loans", {
+export const loans = pgTable("loans", {
   id: text("id").primaryKey(),
   programId: text("program_id").notNull(),
   borrower: text("borrower").notNull(),
@@ -411,5 +452,7 @@ export type Client = typeof clients.$inferSelect;
 export type Application = typeof applications.$inferSelect;
 export type ApplicationDoc = typeof applicationDocs.$inferSelect;
 export type ServiceLogEntry = typeof serviceLog.$inferSelect;
+export type OutcomeLogEntry = typeof outcomeLog.$inferSelect;
+export type ImportJob = typeof importJobs.$inferSelect;
 export type FplSchedule = typeof fplSchedules.$inferSelect;
 export type IntakeField = typeof intakeFields.$inferSelect;

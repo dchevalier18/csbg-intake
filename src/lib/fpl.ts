@@ -10,35 +10,35 @@ import { FPL_BANDS, fplBand } from "@/lib/csbg-catalog";
    records always uses the PINNED schedule, never the active one.
    ============================================================ */
 
-export function getFplHistory(): FplSchedule[] {
-  return db.select().from(t.fplSchedules).orderBy(desc(t.fplSchedules.year)).all();
+export async function getFplHistory(): Promise<FplSchedule[]> {
+  return db.select().from(t.fplSchedules).orderBy(desc(t.fplSchedules.year));
 }
 
-export function getActiveFpl(): FplSchedule {
-  const active = db.select().from(t.fplSchedules).where(eq(t.fplSchedules.status, "active")).get();
+export async function getActiveFpl(): Promise<FplSchedule> {
+  const active = (await db.select().from(t.fplSchedules).where(eq(t.fplSchedules.status, "active")))[0];
   if (active) return active;
-  const latest = db.select().from(t.fplSchedules).orderBy(desc(t.fplSchedules.year)).get();
+  const latest = (await db.select().from(t.fplSchedules).orderBy(desc(t.fplSchedules.year)))[0];
   if (!latest) throw new Error("No FPL schedules configured");
   return latest;
 }
 
 /** Schedule for a pinned year; falls back to the active schedule. */
-export function fplSchedule(year?: number | null): FplSchedule {
+export async function fplSchedule(year?: number | null): Promise<FplSchedule> {
   if (year != null) {
-    const s = db.select().from(t.fplSchedules).where(eq(t.fplSchedules.year, year)).get();
+    const s = (await db.select().from(t.fplSchedules).where(eq(t.fplSchedules.year, year)))[0];
     if (s) return s;
   }
   return getActiveFpl();
 }
 
-export function fplAnnualFor(size: number, year?: number | null): number {
-  const s = fplSchedule(year);
+export async function fplAnnualFor(size: number, year?: number | null): Promise<number> {
+  const s = await fplSchedule(year);
   return s.base + s.perAdditional * (Math.max(1, size) - 1);
 }
 
 /** % of FPL for an income/household size, under a pinned (or active) schedule. */
-export function fplPctFor(income: number, size: number, year?: number | null): number {
-  return Math.round((income / fplAnnualFor(size, year)) * 100);
+export async function fplPctFor(income: number, size: number, year?: number | null): Promise<number> {
+  return Math.round((income / (await fplAnnualFor(size, year))) * 100);
 }
 
 export interface FplStatus {
@@ -51,8 +51,8 @@ export interface FplStatus {
 }
 
 /** Eligibility status vs the agency's CSBG ceiling (% of FPL). */
-export function fplStatusFor(income: number, size: number, year: number | null | undefined, ceiling: number): FplStatus {
-  const s = fplSchedule(year);
+export async function fplStatusFor(income: number, size: number, year: number | null | undefined, ceiling: number): Promise<FplStatus> {
+  const s = await fplSchedule(year);
   const pct = Math.round((income / (s.base + s.perAdditional * (Math.max(1, size) - 1))) * 100);
   const tone = pct <= ceiling ? "sage" : pct <= 200 ? "amber" : "red";
   return {

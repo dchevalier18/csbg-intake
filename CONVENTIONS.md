@@ -2,7 +2,7 @@
 
 Production Next.js port of the Claude Design prototype at
 `C:\Users\admin\Projects\CSBG Client Intake System\design\csbg-client-intake-system\project\`.
-**Goal: pixel-faithful recreation of each design screen, backed by a real SQLite database,
+**Goal: pixel-faithful recreation of each design screen, backed by a real PostgreSQL database,
 real auth, and server-enforced access control.**
 
 ## Stack
@@ -10,9 +10,16 @@ real auth, and server-enforced access control.**
   ported to `src/styles/tokens.css` + `src/styles/app.css`; reuse those class names
   (`panel`, `chip`, `kpi`, `meter`, `field`, `fgrid c2`, `table.data`, `page-head`,
   `calv-btn calv-btn--primary` …). Inline `style={{}}` for one-off layout, exactly like the prototype.
-- SQLite via better-sqlite3 + Drizzle (synchronous). `import { db, t } from "@/db"` —
-  `t` is the schema namespace. Query style: `db.select().from(t.clients).where(eq(...)).all() / .get()`,
-  `db.insert(t.x).values({...}).run()`, `db.update(t.x).set({...}).where(...).run()`.
+- PostgreSQL via node-postgres + Drizzle (async). `import { db, t } from "@/db"` —
+  `t` is the schema namespace; the connection comes from `DATABASE_URL` (defaults to
+  `postgres://csbg:csbg@localhost:5432/csbg_intake`), and the exported `db` transparently
+  waits on a one-time bootstrap (DDL in `src/db/ddl.ts` + auto-seed of an empty database).
+  Query style — every builder is awaited: `await db.select().from(t.clients).where(eq(...))`
+  returns the rows array (`(await …)[0]` for one row), `await db.insert(t.x).values({...})`,
+  `await db.update(t.x).set({...}).where(...)`, `await db.transaction(async (tx) => {...})`.
+  Never leave a db/`audit`/`kvSet` promise floating. Schema changes go in BOTH
+  `src/db/schema.ts` and the bootstrap DDL in `src/db/ddl.ts` (`ADD COLUMN IF NOT EXISTS`
+  migrations append to the same DDL); `npm run smoke` verifies DDL + seed against PGlite.
 - Path aliases: `@/*` → `src/*`. App routes live in `app/`.
 
 ## Auth & access control (NON-NEGOTIABLE)

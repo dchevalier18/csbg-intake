@@ -3,7 +3,7 @@ import { eq, inArray } from "drizzle-orm";
 import { db, t } from "@/db";
 import { requireUser } from "@/lib/auth";
 import { getProgram, userCanSeeProgram } from "@/lib/access";
-import { getEnabledIntakeFields, getOrg, openApplications, staffById } from "@/lib/data/core";
+import { getEnabledIntakeFields, getOrg, getStaff, openApplications } from "@/lib/data/core";
 import { fplStatusFor } from "@/lib/fpl";
 import { completenessPct } from "@/lib/completeness";
 import { CAP_TOOLS, programType } from "@/lib/program-types";
@@ -18,30 +18,30 @@ export default async function ProgramPage({ params }: { params: Promise<{ id: st
   const user = await requireUser();
   const { id } = await params;
 
-  const p = getProgram(id);
+  const p = await getProgram(id);
   if (!p || !p.active) {
     return <div className="empty">Program not found — it may have been removed in Settings.</div>;
   }
-  if (!userCanSeeProgram(user, p.id)) return <Restricted what={p.name} />;
+  if (!await userCanSeeProgram(user, p.id)) return <Restricted what={p.name} />;
 
   const type = programType(p.type);
-  const org = getOrg();
-  const fields = getEnabledIntakeFields();
+  const org = await getOrg();
+  const fields = await getEnabledIntakeFields();
   const fy = currentFY();
 
   // enrolled clients on this program (access already verified above)
-  const memberIds = db.select().from(t.clientPrograms)
-    .where(eq(t.clientPrograms.programId, p.id)).all().map((m) => m.clientId);
+  const memberIds = (await db.select().from(t.clientPrograms)
+    .where(eq(t.clientPrograms.programId, p.id))).map((m) => m.clientId);
   const members = memberIds.length
-    ? db.select().from(t.clients).where(inArray(t.clients.id, memberIds)).all()
+    ? (await db.select().from(t.clients).where(inArray(t.clients.id, memberIds)))
         .filter((c) => c.status === "active")
     : [];
 
   // open eligibility applications for this program (newest first)
-  const apps = openApplications([p.id]);
+  const apps = await openApplications([p.id]);
 
   // services logged for this program this FY (latest first)
-  const svc = db.select().from(t.serviceLog).where(eq(t.serviceLog.programId, p.id)).all()
+  const svc = (await db.select().from(t.serviceLog).where(eq(t.serviceLog.programId, p.id)))
     .filter((s) => s.date >= fy.start && s.date <= fy.end)
     .sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id);
 
@@ -51,8 +51,9 @@ export default async function ProgramPage({ params }: { params: Promise<{ id: st
 
   const tools = type.caps.map((cap) => ({ cap, ...CAP_TOOLS[cap] }));
 
-  const memberRows: MemberRow[] = members.map((c) => {
-    const st = fplStatusFor(c.income, c.hhSize, c.fplYear, org.csbgCeiling);
+  const staffMap = new Map((await getStaff()).map((u) => [u.id, u]));
+  const memberRows: MemberRow[] = await Promise.all(members.map(async (c) => {
+    const st = await fplStatusFor(c.income, c.hhSize, c.fplYear, org.csbgCeiling);
     return {
       id: c.id,
       name: c.first + " " + c.last,
@@ -60,14 +61,14 @@ export default async function ProgramPage({ params }: { params: Promise<{ id: st
       fplLabel: st.label,
       fplTone: st.tone,
       pct: completenessPct(c, fields),
-      worker: staffById(c.caseworkerId)?.name ?? "—",
+      worker: staffMap.get(c.caseworkerId ?? "")?.name ?? "—",
     };
-  });
+  }));
 
   // client names for the recent-services feed
   const svcClientIds = [...new Set(svc.slice(0, 4).map((s) => s.clientId))];
   const svcClients = svcClientIds.length
-    ? db.select().from(t.clients).where(inArray(t.clients.id, svcClientIds)).all()
+    ? await db.select().from(t.clients).where(inArray(t.clients.id, svcClientIds))
     : [];
   const clientName = (cid: string) => {
     const c = svcClients.find((x) => x.id === cid);

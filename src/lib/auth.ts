@@ -33,8 +33,8 @@ export async function createSession(userId: string): Promise<void> {
   const token = crypto.randomBytes(32).toString("hex");
   const expiresAt = new Date(Date.now() + SESSION_DAYS * 86400_000).toISOString();
   // opportunistic cleanup of expired sessions
-  db.delete(t.sessions).where(lt(t.sessions.expiresAt, new Date().toISOString())).run();
-  db.insert(t.sessions).values({ token, userId, expiresAt }).run();
+  await db.delete(t.sessions).where(lt(t.sessions.expiresAt, new Date().toISOString()));
+  await db.insert(t.sessions).values({ token, userId, expiresAt });
   const jar = await cookies();
   jar.set(COOKIE, token, {
     httpOnly: true,
@@ -48,7 +48,7 @@ export async function createSession(userId: string): Promise<void> {
 export async function destroySession(): Promise<void> {
   const jar = await cookies();
   const token = jar.get(COOKIE)?.value;
-  if (token) db.delete(t.sessions).where(eq(t.sessions.token, token)).run();
+  if (token) await db.delete(t.sessions).where(eq(t.sessions.token, token));
   jar.delete(COOKIE);
 }
 
@@ -57,9 +57,9 @@ export const getCurrentUser = cache(async (): Promise<User | null> => {
   const jar = await cookies();
   const token = jar.get(COOKIE)?.value;
   if (!token) return null;
-  const session = db.select().from(t.sessions).where(eq(t.sessions.token, token)).get();
+  const session = (await db.select().from(t.sessions).where(eq(t.sessions.token, token)))[0];
   if (!session || session.expiresAt < new Date().toISOString()) return null;
-  const user = db.select().from(t.users).where(eq(t.users.id, session.userId)).get();
+  const user = (await db.select().from(t.users).where(eq(t.users.id, session.userId)))[0];
   return user && user.active ? user : null;
 });
 

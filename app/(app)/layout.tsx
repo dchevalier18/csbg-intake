@@ -11,16 +11,15 @@ import { signOut } from "../(auth)/actions";
 
 export default async function AppLayout({ children }: { children: ReactNode }) {
   const user = await requireUser();
-  const org = db.select().from(t.organization).where(eq(t.organization.id, 1)).get()!;
-  const navPrograms = visiblePrograms(user);
+  const org = (await db.select().from(t.organization).where(eq(t.organization.id, 1)))[0]!;
+  const navPrograms = await visiblePrograms(user);
   const fy = currentFY();
 
   // open applications visible to this user (terminal stages excluded)
   const visibleIds = navPrograms.map((p) => p.id);
   const openCount = visibleIds.length
-    ? db.select({ stage: t.applications.stage }).from(t.applications)
-        .where(inArray(t.applications.programId, visibleIds))
-        .all()
+    ? (await db.select({ stage: t.applications.stage }).from(t.applications)
+        .where(inArray(t.applications.programId, visibleIds)))
         .filter((a) => a.stage !== "approved" && a.stage !== "denied").length
     : 0;
 

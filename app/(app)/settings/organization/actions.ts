@@ -33,7 +33,7 @@ export async function updateOrgProfile(input: OrgProfileInput): Promise<ActionRe
   if (!name) return { ok: false, message: "Organization name is required." };
   const fyStart = FY_STARTS.includes(input.fyStart) ? input.fyStart : "October";
   const csbgCeiling = CEILINGS.includes(Number(input.csbgCeiling)) ? Number(input.csbgCeiling) : 125;
-  db.update(t.organization)
+  await db.update(t.organization)
     .set({
       name,
       short: (input.short ?? "").trim(),
@@ -43,8 +43,8 @@ export async function updateOrgProfile(input: OrgProfileInput): Promise<ActionRe
       csbgCeiling,
     })
     .where(eq(t.organization.id, 1))
-    .run();
-  audit(user.id, "org.update", "organization", "1", `Agency profile saved (${name}, FY starts ${fyStart}, ceiling ${csbgCeiling}% FPL)`);
+    ;
+  await audit(user.id, "org.update", "organization", "1", `Agency profile saved (${name}, FY starts ${fyStart}, ceiling ${csbgCeiling}% FPL)`);
   revalidatePath("/", "layout");
   return { ok: true, message: "Agency profile saved." };
 }
@@ -53,8 +53,8 @@ export async function updateOrgAccent(hex: string): Promise<ActionResult> {
   const user = await requireAdmin();
   const accent = ACCENTS.find((a) => a.hex === hex);
   if (!accent) return { ok: false, message: "Pick one of the offered brand colors." };
-  db.update(t.organization).set({ accent: accent.hex }).where(eq(t.organization.id, 1)).run();
-  audit(user.id, "org.update", "organization", "1", `Brand color → ${accent.name} (${accent.hex})`);
+  await db.update(t.organization).set({ accent: accent.hex }).where(eq(t.organization.id, 1));
+  await audit(user.id, "org.update", "organization", "1", `Brand color → ${accent.name} (${accent.hex})`);
   revalidatePath("/", "layout");
   return { ok: true, message: `Brand color set to ${accent.name} — the whole workspace re-skinned.` };
 }
@@ -67,14 +67,14 @@ export async function updateOrgLogo(input: { mode: string; data?: string | null 
     const data = input.data ?? "";
     if (!data.startsWith("data:image/")) return { ok: false, message: "That file doesn't look like an image." };
     if (data.length > MAX_LOGO_CHARS) return { ok: false, message: "That image is too large — keep it under 500 KB." };
-    db.update(t.organization).set({ logoMode: "upload", logoData: data }).where(eq(t.organization.id, 1)).run();
-    audit(user.id, "org.update", "organization", "1", "Logo uploaded (custom image)");
+    await db.update(t.organization).set({ logoMode: "upload", logoData: data }).where(eq(t.organization.id, 1));
+    await audit(user.id, "org.update", "organization", "1", "Logo uploaded (custom image)");
     revalidatePath("/", "layout");
     return { ok: true, message: "Logo uploaded — your sidebar updated." };
   }
 
-  db.update(t.organization).set({ logoMode: input.mode }).where(eq(t.organization.id, 1)).run();
-  audit(user.id, "org.update", "organization", "1", `Logo mode → ${input.mode}`);
+  await db.update(t.organization).set({ logoMode: input.mode }).where(eq(t.organization.id, 1));
+  await audit(user.id, "org.update", "organization", "1", `Logo mode → ${input.mode}`);
   revalidatePath("/", "layout");
   return {
     ok: true,

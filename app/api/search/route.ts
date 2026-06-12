@@ -10,7 +10,7 @@ export async function GET(req: NextRequest) {
   const q = (req.nextUrl.searchParams.get("q") ?? "").trim().toLowerCase();
   if (q.length < 2) return NextResponse.json([]);
 
-  const hits = visibleClients(user)
+  const hits = (await visibleClients(user))
     .filter((c) =>
       (c.first + " " + c.last).toLowerCase().includes(q) ||
       c.id.toLowerCase().includes(q) ||

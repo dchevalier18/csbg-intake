@@ -14,7 +14,13 @@ export const longDate = (iso: string): string =>
 
 /** Today's date as "YYYY-MM-DD" (local). */
 export function todayIso(): string {
-  const d = new Date();
+  return localDateOf(new Date().toISOString());
+}
+
+/** Local "YYYY-MM-DD" calendar date for a stored ISO datetime instant. Use before
+    shortDate/longDate so an evening timestamp doesn't display as the next UTC day. */
+export function localDateOf(iso: string): string {
+  const d = new Date(iso);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 

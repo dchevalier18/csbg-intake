@@ -23,7 +23,7 @@ function hintKeyFor(docKey: string, status: string): PortalHintKey {
 
 export default async function PortalPage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
-  const app = db.select().from(t.applications).where(eq(t.applications.portalToken, token)).get();
+  const app = (await db.select().from(t.applications).where(eq(t.applications.portalToken, token)))[0];
 
   if (!app) {
     // Friendly plain dead-link page — no application details leak.
@@ -42,11 +42,11 @@ export default async function PortalPage({ params }: { params: Promise<{ token: 
     );
   }
 
-  const org = getOrg();
-  const program = getProgram(app.programId);
-  const cw = staffById(app.caseworkerId);
+  const org = await getOrg();
+  const program = await getProgram(app.programId);
+  const cw = await staffById(app.caseworkerId);
 
-  const docs: PortalDoc[] = applicationDocList(app).map((d) => ({
+  const docs: PortalDoc[] = (await applicationDocList(app)).map((d) => ({
     key: d.key,
     label: d.label,
     status: d.status,
@@ -54,8 +54,8 @@ export default async function PortalPage({ params }: { params: Promise<{ token: 
   }));
 
   // "What's next" appointment — a seminar this application is registered for
-  const att = db.select().from(t.seminarAttendees).where(eq(t.seminarAttendees.applicationId, app.id)).get();
-  const sem = att ? db.select().from(t.seminars).where(eq(t.seminars.id, att.seminarId)).get() : undefined;
+  const att = (await db.select().from(t.seminarAttendees).where(eq(t.seminarAttendees.applicationId, app.id)))[0];
+  const sem = att ? (await db.select().from(t.seminars).where(eq(t.seminars.id, att.seminarId)))[0] : undefined;
   const appointment = sem
     ? {
         what: sem.title,

@@ -28,37 +28,37 @@ export async function addServiceEntry(input: {
   if (!clientId || !code) return { ok: false, message: "Pick a client and a service first." };
 
   // Client must be visible to this user (program-scoped).
-  const client = visibleClient(user, clientId);
+  const client = await visibleClient(user, clientId);
   if (!client) return { ok: false, message: "That client isn't visible to your account." };
 
   // Program must be one the client is enrolled in AND one the user can see.
   if (!programId || !client.programIds.includes(programId)) {
     return { ok: false, message: "That client isn't enrolled in the selected program." };
   }
-  if (!userCanSeeProgram(user, programId)) {
+  if (!await userCanSeeProgram(user, programId)) {
     return { ok: false, message: "Your account isn't assigned to that program." };
   }
 
   // Service code must exist and be active.
-  const svc = db.select().from(t.services).where(eq(t.services.code, code)).get();
+  const svc = (await db.select().from(t.services).where(eq(t.services.code, code)))[0];
   if (!svc || svc.active !== 1) {
     return { ok: false, message: "Unknown or inactive service code." };
   }
 
-  const res = db.insert(t.serviceLog).values({
+  const inserted = await db.insert(t.serviceLog).values({
     date: todayIso(),
     clientId,
     code,
     programId,
     staffId: user.id,
     note: note || "—",
-  }).run();
+  }).returning({ id: t.serviceLog.id });
 
-  audit(
+  await audit(
     user.id,
     "service.log",
     "service_log",
-    String(res.lastInsertRowid),
+    String(inserted[0].id),
     `${code} · ${client.first} ${client.last} (${clientId}) · ${programId}`,
   );
 

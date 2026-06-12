@@ -20,21 +20,22 @@ export default async function DashboardPage() {
   const fy = currentFY();
   const today = todayIso();
 
-  const programs = getPrograms();
+  const programs = await getPrograms();
   const programById = new Map(programs.map((p) => [p.id, p]));
-  const vis = visibleClients(user);
-  const vApps = openApplications([...visibleProgramIds(user)]);
+  const vis = await visibleClients(user);
+  const vApps = await openApplications([...await visibleProgramIds(user)]);
   const mine = vis.filter((c) => c.caseworkerId === user.id);
 
   // live completeness (never stored)
-  const fields = getEnabledIntakeFields();
+  const fields = await getEnabledIntakeFields();
   const pctOf = new Map(vis.map((c) => [c.id, completenessPct(c, fields)]));
   const avgComplete = vis.length
     ? Math.round(vis.reduce((s, c) => s + (pctOf.get(c.id) ?? 100), 0) / vis.length)
     : 100;
   const issues = vis.filter((c) => (pctOf.get(c.id) ?? 100) < 100);
 
-  const docsBlocked = vApps.filter((a) => applicationDocList(a).some((d) => d.status !== "verified"));
+  const appDocLists = await Promise.all(vApps.map((a) => applicationDocList(a)));
+  const docsBlocked = vApps.filter((_, i) => appDocLists[i].some((d) => d.status !== "verified"));
   const readyReview = vApps.filter((a) => a.stage === "review" || a.stage === "decision");
   const oldest = [...vApps].sort((a, b) => a.applied.localeCompare(b.applied))[0];
 
@@ -60,8 +61,8 @@ export default async function DashboardPage() {
   });
 
   // agency pulse aggregates (history predating this system)
-  const agency = kvGet<{ individualsServed: number }>("agency", { individualsServed: 0 });
-  const srvByDomain = kvGet<Array<{ domain: string; count: number }>>("srvByDomain", []);
+  const agency = await kvGet<{ individualsServed: number }>("agency", { individualsServed: 0 });
+  const srvByDomain = await kvGet<Array<{ domain: string; count: number }>>("srvByDomain", []);
   const maxSrv = srvByDomain.length ? Math.max(...srvByDomain.map((d) => d.count)) : 1;
 
   const todayLong = new Date(today + "T12:00:00").toLocaleDateString("en-US", {

@@ -10,13 +10,12 @@ export default async function LoginPage() {
   const me = await getCurrentUser();
   if (me) redirect("/dashboard");
 
-  const org = db.select().from(t.organization).where(eq(t.organization.id, 1)).get();
-  const demoUsers = db
+  const org = (await db.select().from(t.organization).where(eq(t.organization.id, 1)))[0];
+  const demoUsers = await db
     .select({ name: t.users.name, role: t.users.role, username: t.users.username, initials: t.users.initials })
     .from(t.users)
     .where(eq(t.users.active, 1))
-    .orderBy(asc(t.users.name))
-    .all();
+    .orderBy(asc(t.users.name));
 
   return (
     <div className="login-wrap" style={{ "--brand": org?.accent ?? "#D14124" } as React.CSSProperties}>

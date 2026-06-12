@@ -6,8 +6,8 @@ import { FplClient } from "./fpl-client";
 
 export default async function FplSettingsPage() {
   await requireAdmin();
-  const org = getOrg();
-  const history = getFplHistory().map((s) => ({
+  const org = await getOrg();
+  const history = (await getFplHistory()).map((s) => ({
     year: s.year,
     base: s.base,
     perAdditional: s.perAdditional,
@@ -19,9 +19,9 @@ export default async function FplSettingsPage() {
   // Decided applications are excluded — approved ones live on as the created
   // client (counting both would double-count), and this matches the basis
   // publishFpl uses for its "N cases stay pinned" message.
-  const clientYears = db.select({ fplYear: t.clients.fplYear }).from(t.clients).all();
-  const appYears = db.select({ fplYear: t.applications.fplYear, stage: t.applications.stage })
-    .from(t.applications).all()
+  const clientYears = await db.select({ fplYear: t.clients.fplYear }).from(t.clients);
+  const appYears = (await db.select({ fplYear: t.applications.fplYear, stage: t.applications.stage })
+    .from(t.applications))
     .filter((a) => (OPEN_STAGES as readonly string[]).includes(a.stage));
   const pinned: Record<number, number> = {};
   for (const r of [...clientYears, ...appYears]) pinned[r.fplYear] = (pinned[r.fplYear] ?? 0) + 1;

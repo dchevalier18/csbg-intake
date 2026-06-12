@@ -26,10 +26,10 @@ export interface NewSeminarInput {
 
 export async function createSeminar(input: NewSeminarInput): Promise<ActionResult> {
   const user = await requireUser();
-  if (!userHasCap(user, "seminars")) return { ok: false, message: "No access to seminar tools." };
+  if (!await userHasCap(user, "seminars")) return { ok: false, message: "No access to seminar tools." };
 
   // the seminar belongs to the user's visible seminars-capable program
-  const program = visiblePrograms(user).find((p) => programType(p.type).caps.includes("seminars"));
+  const program = (await visiblePrograms(user)).find((p) => programType(p.type).caps.includes("seminars"));
   if (!program) return { ok: false, message: "No seminar-capable program assigned." };
 
   const title = (input.title ?? "").trim();
@@ -44,38 +44,38 @@ export async function createSeminar(input: NewSeminarInput): Promise<ActionResul
   if (!Number.isFinite(capacity) || capacity < 1) return { ok: false, message: "Capacity must be at least 1." };
 
   // SRV code must be one of the common picks, or an active Income/Housing service
-  const svc = db.select().from(t.services).where(eq(t.services.code, srvCode)).get();
+  const svc = (await db.select().from(t.services).where(eq(t.services.code, srvCode)))[0];
   const allowed = svc && svc.active === 1 &&
     (COMMON_CODES.includes(svc.code) || svc.domain === "inc" || svc.domain === "hou");
   if (!allowed) return { ok: false, message: "Pick a valid service code for this seminar." };
 
   // next "SEM-N" id
   let max = 0;
-  for (const r of db.select({ id: t.seminars.id }).from(t.seminars).all()) {
+  for (const r of await db.select({ id: t.seminars.id }).from(t.seminars)) {
     const n = Number(r.id.replace("SEM-", ""));
     if (Number.isFinite(n) && n > max) max = n;
   }
   const id = `SEM-${max + 1}`;
 
-  db.insert(t.seminars).values({
+  await db.insert(t.seminars).values({
     id, programId: program.id, title, date, time, site, capacity, registered: 0, srvCode,
-  }).run();
+  });
 
-  audit(user.id, "seminar.create", "seminar", id, `${title} · ${date} · ${srvCode}`);
+  await audit(user.id, "seminar.create", "seminar", id, `${title} · ${date} · ${srvCode}`);
   revalidatePath("/tools/seminars");
   return { ok: true, message: `Seminar created — ${id} · ${title}.`, id };
 }
 
 export async function markAttendance(seminarId: string): Promise<ActionResult> {
   const user = await requireUser();
-  if (!userHasCap(user, "seminars")) return { ok: false, message: "No access to seminar tools." };
+  if (!await userHasCap(user, "seminars")) return { ok: false, message: "No access to seminar tools." };
 
-  const sem = db.select().from(t.seminars).where(eq(t.seminars.id, seminarId)).get();
-  if (!sem || !userCanSeeProgram(user, sem.programId)) return { ok: false, message: "Seminar not found." };
+  const sem = (await db.select().from(t.seminars).where(eq(t.seminars.id, seminarId)))[0];
+  if (!sem || !await userCanSeeProgram(user, sem.programId)) return { ok: false, message: "Seminar not found." };
   if (sem.date > todayIso()) return { ok: false, message: "Attendance opens once the seminar has been held." };
 
-  const attendees = db.select().from(t.seminarAttendees)
-    .where(eq(t.seminarAttendees.seminarId, seminarId)).all();
+  const attendees = await db.select().from(t.seminarAttendees)
+    .where(eq(t.seminarAttendees.seminarId, seminarId));
   const withClient = attendees.filter((a) => a.clientId);
   if (withClient.length === 0) {
     return { ok: false, message: "No attendees with client records yet — run quick intake first." };
@@ -83,25 +83,25 @@ export async function markAttendance(seminarId: string): Promise<ActionResult> {
 
   // double-post guard: one attendance posting per seminar
   const note = `${sem.title} — seminar attendance.`;
-  const alreadyPosted = db.select().from(t.serviceLog)
-    .where(and(eq(t.serviceLog.date, sem.date), eq(t.serviceLog.programId, sem.programId), eq(t.serviceLog.note, note)))
-    .all().length > 0;
+  const alreadyPosted = (await db.select().from(t.serviceLog)
+    .where(and(eq(t.serviceLog.date, sem.date), eq(t.serviceLog.programId, sem.programId), eq(t.serviceLog.note, note))))
+    .length > 0;
   if (alreadyPosted) {
     return { ok: false, message: "Attendance was already posted for this seminar." };
   }
 
   for (const a of withClient) {
-    db.insert(t.serviceLog).values({
+    await db.insert(t.serviceLog).values({
       date: sem.date,
       clientId: a.clientId!,
       code: sem.srvCode,
       programId: sem.programId,
       staffId: user.id,
       note,
-    }).run();
+    });
   }
 
-  audit(user.id, "seminar.attendance.post", "seminar", seminarId,
+  await audit(user.id, "seminar.attendance.post", "seminar", seminarId,
     `${withClient.length} entries · ${sem.srvCode}`);
   revalidatePath("/tools/seminars");
   revalidatePath("/services");

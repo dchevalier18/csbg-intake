@@ -1,9 +1,14 @@
 "use client";
-/* Data & integrations — admin-only. Integration cards + matching stats; toasts only (no writes). */
-import { Chip, PageHead, Panel } from "@/components/ui";
+/* Data & integrations — admin-only. Integration cards + matching stats, plus the
+   spreadsheet import wizard (template → upload → map columns → results). */
+import { useState, useTransition } from "react";
+import { Chip, Empty, Field, Notice, PageHead, Panel } from "@/components/ui";
+import { Modal } from "@/components/ui-client";
 import { I } from "@/components/icons";
 import { useToast } from "@/components/toast";
 import { fmt } from "@/lib/format";
+import { IMPORT_TEMPLATES, autoMapColumns, importTemplate, type ImportTemplate } from "@/lib/import-templates";
+import { parseImportFile, commitImport, type ImportSummary } from "./actions";
 
 export interface IntegrationRow {
   id: string;
@@ -22,14 +27,27 @@ export interface MatchingStats {
   silent: number;
 }
 
+export interface ImportJobRow {
+  id: number;
+  when: string;
+  template: string;
+  filename: string;
+  imported: number;
+  updated: number;
+  skipped: number;
+  staffInitials: string;
+}
+
 const tone: Record<string, string> = { connected: "sage", attention: "amber", ready: "teal" };
 const label: Record<string, string> = { connected: "Connected", attention: "Needs attention", ready: "Ready" };
 
-export function DataClient({ integrations, matching }: {
+export function DataClient({ integrations, matching, importJobs }: {
   integrations: IntegrationRow[];
   matching: MatchingStats;
+  importJobs: ImportJobRow[];
 }) {
   const toast = useToast();
+  const [wizardOpen, setWizardOpen] = useState(false);
 
   return (
     <div>
@@ -38,8 +56,7 @@ export function DataClient({ integrations, matching }: {
         titleAccent="integrations."
         lede="One client record, many sources — sync from existing systems instead of double entry."
         right={
-          <button className="calv-btn calv-btn--secondary calv-btn--sm"
-            onClick={() => toast("Import wizard opened — select a template to map columns.")}>
+          <button className="calv-btn calv-btn--secondary calv-btn--sm" onClick={() => setWizardOpen(true)}>
             <I name="upload" size={14} /> Import spreadsheet
           </button>}
       />
@@ -67,6 +84,13 @@ export function DataClient({ integrations, matching }: {
                   onClick={() => toast("De-duplication review queued — conflicts assigned to the data team.")}>Review matches</button>
               </div>
             ) : null}
+            {x.id === "sheets" ? (
+              <div style={{ marginTop: 12 }}>
+                <button className="calv-btn calv-btn--quiet calv-btn--sm" onClick={() => setWizardOpen(true)}>
+                  <I name="upload" size={13} /> Run an import
+                </button>
+              </div>
+            ) : null}
           </Panel>
         ))}
         <Panel>
@@ -79,6 +103,29 @@ export function DataClient({ integrations, matching }: {
         </Panel>
       </div>
 
+      <Panel title="Recent imports" sub="Spreadsheet imports land here with row-level results." style={{ marginBottom: 13 }}>
+        {importJobs.length === 0 ? (
+          <Empty padding={20}>No spreadsheet imports yet — run one with the button above.</Empty>
+        ) : (
+          <table className="data">
+            <thead><tr><th>Date</th><th>Template</th><th>File</th><th className="num">Added</th><th className="num">Updated</th><th className="num">Skipped</th><th>By</th></tr></thead>
+            <tbody>
+              {importJobs.map((j) => (
+                <tr key={j.id}>
+                  <td style={{ whiteSpace: "nowrap" }}>{j.when}</td>
+                  <td className="cname">{j.template}</td>
+                  <td style={{ color: "var(--calv-slate-65)", maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis" }}>{j.filename}</td>
+                  <td className="num">{fmt(j.imported)}</td>
+                  <td className="num">{fmt(j.updated)}</td>
+                  <td className="num">{j.skipped > 0 ? <Chip tone="amber">{fmt(j.skipped)}</Chip> : "0"}</td>
+                  <td>{j.staffInitials}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </Panel>
+
       <Panel title="How matching works" sub="Incoming records are matched on name + DOB + last-4 SSN; conflicts queue for human review — nothing merges silently.">
         <div style={{ display: "flex", gap: 24, fontSize: 12.5, color: "var(--calv-slate-65)", flexWrap: "wrap" }}>
           <span><strong style={{ fontWeight: 600, color: "var(--calv-slate)" }}>{fmt(matching.auto)}</strong> records matched automatically this FY</span>
@@ -87,6 +134,184 @@ export function DataClient({ integrations, matching }: {
           <span><strong style={{ fontWeight: 600, color: "var(--calv-slate)" }}>{fmt(matching.silent)}</strong> silent merges — by design</span>
         </div>
       </Panel>
+
+      {wizardOpen ? <ImportWizard onClose={() => setWizardOpen(false)} toast={toast} /> : null}
     </div>
+  );
+}
+
+/* ---------- Import wizard: template → upload → map columns → results ---------- */
+
+type WizardStep = "pick" | "map" | "done";
+
+function ImportWizard({ onClose, toast }: { onClose: () => void; toast: (msg: string) => void }) {
+  const [pending, startTransition] = useTransition();
+  const [step, setStep] = useState<WizardStep>("pick");
+  const [templateId, setTemplateId] = useState<string>("");
+  const [filename, setFilename] = useState("");
+  const [headers, setHeaders] = useState<string[]>([]);
+  const [rows, setRows] = useState<string[][]>([]);
+  const [mapping, setMapping] = useState<Record<string, number>>({});
+  const [result, setResult] = useState<ImportSummary | null>(null);
+
+  const tpl: ImportTemplate | undefined = importTemplate(templateId);
+
+  function pickFile(file: File | undefined) {
+    if (!file || !tpl) return;
+    if (file.size > 4 * 1024 * 1024) {
+      toast("Files up to 4 MB are supported — split larger exports.");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const base64 = String(reader.result ?? "").split(",")[1] ?? "";
+      startTransition(async () => {
+        const res = await parseImportFile(file.name, base64);
+        if (!res.ok || !res.headers || !res.rows) {
+          toast(res.message ?? "That file couldn't be read.");
+          return;
+        }
+        setFilename(file.name);
+        setHeaders(res.headers);
+        setRows(res.rows);
+        setMapping(autoMapColumns(tpl, res.headers));
+        setStep("map");
+      });
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function runImport() {
+    if (!tpl) return;
+    startTransition(async () => {
+      const res = await commitImport(tpl.id, filename, mapping, rows);
+      if (!res.ok) {
+        toast(res.message);
+        return;
+      }
+      setResult(res);
+      setStep("done");
+      toast(res.message);
+    });
+  }
+
+  const requiredMapped = tpl ? tpl.fields.every((f) => !f.required || (mapping[f.key] ?? -1) >= 0) : false;
+  const previewFields = tpl ? tpl.fields.filter((f) => (mapping[f.key] ?? -1) >= 0) : [];
+
+  return (
+    <Modal title="Import a spreadsheet" width={760} onClose={onClose}>
+      {step === "pick" ? (
+        <>
+          <p style={{ fontSize: 12.5, color: "var(--calv-slate-65)", margin: "0 0 12px" }}>
+            Pick the recurring template, then upload the CSV or XLSX export — columns map automatically and nothing lands without your review.
+          </p>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10, marginBottom: 16 }}>
+            {IMPORT_TEMPLATES.map((tp) => (
+              <button
+                key={tp.id}
+                type="button"
+                onClick={() => setTemplateId(tp.id)}
+                style={{
+                  textAlign: "left", padding: "12px 14px", borderRadius: 4, cursor: "pointer", background: "#fff",
+                  border: templateId === tp.id ? "2px solid var(--brand)" : "1px solid var(--calv-slate-15)",
+                }}
+              >
+                <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 5 }}>
+                  <I name="upload" size={14} style={{ color: templateId === tp.id ? "var(--brand)" : "var(--calv-slate-65)" }} />
+                  <span style={{ fontFamily: "var(--font-sub)", fontWeight: 700, fontSize: 12.5, textTransform: "uppercase", letterSpacing: ".02em" }}>{tp.name}</span>
+                </div>
+                <div style={{ fontSize: 11.5, color: "var(--calv-slate-65)", lineHeight: 1.45 }}>{tp.blurb}</div>
+              </button>
+            ))}
+          </div>
+          <div className="fgrid">
+            <Field label="Spreadsheet file" required hint={tpl ? `Expected columns: ${tpl.fields.map((f) => f.label).join(", ")}` : "Pick a template first"}>
+              <input
+                type="file"
+                accept=".csv,.xlsx,.xls"
+                disabled={!tpl || pending}
+                onChange={(e) => pickFile(e.target.files?.[0])}
+              />
+            </Field>
+          </div>
+          {pending ? <p style={{ fontSize: 12.5, color: "var(--calv-slate-65)", margin: "10px 0 0" }}>Reading the file…</p> : null}
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 18 }}>
+            <button className="calv-btn calv-btn--quiet calv-btn--sm" onClick={onClose}>Cancel</button>
+          </div>
+        </>
+      ) : null}
+
+      {step === "map" && tpl ? (
+        <>
+          <p style={{ fontSize: 12.5, color: "var(--calv-slate-65)", margin: "0 0 12px" }}>
+            <strong style={{ fontWeight: 600, color: "var(--calv-slate)" }}>{filename}</strong> — {fmt(rows.length)} data row{rows.length === 1 ? "" : "s"}. Match each {tpl.name.toLowerCase()} field to a column.
+          </p>
+          <div className="fgrid c3" style={{ marginBottom: 14 }}>
+            {tpl.fields.map((f) => (
+              <Field key={f.key} label={f.label} required={f.required} hint={f.hint}>
+                <select
+                  value={String(mapping[f.key] ?? -1)}
+                  onChange={(e) => setMapping((m) => ({ ...m, [f.key]: Number(e.target.value) }))}
+                >
+                  <option value="-1">— Not mapped —</option>
+                  {headers.map((h, i) => <option key={i} value={String(i)}>{h || `Column ${i + 1}`}</option>)}
+                </select>
+              </Field>
+            ))}
+          </div>
+          {previewFields.length > 0 ? (
+            <div className="compact" style={{ marginBottom: 4 }}>
+              <table className="data">
+                <thead><tr>{previewFields.map((f) => <th key={f.key}>{f.label}</th>)}</tr></thead>
+                <tbody>
+                  {rows.slice(0, 6).map((r, i) => (
+                    <tr key={i}>
+                      {previewFields.map((f) => <td key={f.key} style={{ color: "var(--calv-slate-65)" }}>{r[mapping[f.key]] || "—"}</td>)}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {rows.length > 6 ? <p style={{ fontSize: 11.5, color: "var(--calv-slate-65)", margin: "8px 0 0" }}>…and {fmt(rows.length - 6)} more row{rows.length - 6 === 1 ? "" : "s"}.</p> : null}
+            </div>
+          ) : null}
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginTop: 18 }}>
+            <button className="calv-btn calv-btn--quiet calv-btn--sm" onClick={() => { setStep("pick"); setHeaders([]); setRows([]); }}>← Back</button>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button className="calv-btn calv-btn--quiet calv-btn--sm" onClick={onClose}>Cancel</button>
+              <button
+                className="calv-btn calv-btn--primary calv-btn--sm"
+                disabled={!requiredMapped || pending}
+                style={!requiredMapped || pending ? { opacity: 0.45, cursor: "not-allowed" } : undefined}
+                onClick={runImport}
+              >
+                <I name="check" size={13} /> Import {fmt(rows.length)} row{rows.length === 1 ? "" : "s"}
+              </button>
+            </div>
+          </div>
+        </>
+      ) : null}
+
+      {step === "done" && result ? (
+        <>
+          <Notice tone={result.imported + result.updated > 0 ? "good" : "warn"} icon={result.imported + result.updated > 0 ? "check" : "alert"}>
+            {result.message}
+          </Notice>
+          {result.errors.length > 0 ? (
+            <div style={{ marginTop: 12 }}>
+              <div style={{ fontFamily: "var(--font-sub)", fontSize: 10, fontWeight: 700, letterSpacing: ".04em", textTransform: "uppercase", color: "var(--calv-slate-65)", marginBottom: 6 }}>
+                Skipped rows
+              </div>
+              <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12.5, color: "var(--calv-slate-65)", lineHeight: 1.7 }}>
+                {result.errors.slice(0, 8).map((e, i) => <li key={i}>{e}</li>)}
+              </ul>
+              {result.errors.length > 8 ? <p style={{ fontSize: 11.5, color: "var(--calv-slate-65)", margin: "6px 0 0" }}>…and {result.errors.length - 8} more — fix the rows and re-import; duplicates are skipped automatically.</p> : null}
+            </div>
+          ) : null}
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 18 }}>
+            <button className="calv-btn calv-btn--primary calv-btn--sm" onClick={onClose}><I name="check" size={13} /> Done</button>
+          </div>
+        </>
+      ) : null}
+    </Modal>
   );
 }
