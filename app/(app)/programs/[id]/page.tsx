@@ -53,7 +53,7 @@ export default async function ProgramPage({ params }: { params: Promise<{ id: st
 
   const staffMap = new Map((await getStaff()).map((u) => [u.id, u]));
   const memberRows: MemberRow[] = await Promise.all(members.map(async (c) => {
-    const st = await fplStatusFor(c.income, c.hhSize, c.fplYear, org.csbgCeiling);
+    const st = await fplStatusFor(c.income, c.hhSize, c.fplYear, p.fplCeiling ?? org.csbgCeiling);
     return {
       id: c.id,
       name: c.first + " " + c.last,

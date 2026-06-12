@@ -15,9 +15,12 @@ export default async function EligibilityPage() {
   const apps = await openApplications(programs.map((p) => p.id));
 
   const staffName = new Map((await getStaff()).map((u) => [u.id, u.name]));
+  // eligibility is judged against each application's PROGRAM ceiling (program
+  // override when set, agency-wide CSBG ceiling otherwise)
+  const ceilingOf = (programId: string) => byId.get(programId)?.fplCeiling ?? org.csbgCeiling;
   const rows: AppRow[] = await Promise.all(apps.map(async (a) => {
     const p = byId.get(a.programId);
-    const st = await fplStatusFor(a.income, a.hhSize, a.fplYear, org.csbgCeiling);
+    const st = await fplStatusFor(a.income, a.hhSize, a.fplYear, ceilingOf(a.programId));
     return {
       id: a.id,
       first: a.first,
@@ -30,6 +33,7 @@ export default async function EligibilityPage() {
       notes: a.notes,
       programColor: p?.color ?? "var(--calv-slate-35)",
       programShort: p?.short ?? a.programId,
+      ceiling: ceilingOf(a.programId),
       caseworker: staffName.get(a.caseworkerId ?? "") ?? "—",
       fpl: { pct: st.pct, label: st.label, tone: st.tone, eligible: st.eligible, year: st.year },
       docs: (await applicationDocList(a)).map((d) => ({
@@ -47,5 +51,5 @@ export default async function EligibilityPage() {
     };
   }));
 
-  return <EligibilityClient rows={rows} ceiling={org.csbgCeiling} currentUserName={user.name} />;
+  return <EligibilityClient rows={rows} currentUserName={user.name} />;
 }

@@ -50,6 +50,7 @@ export const programs = pgTable("programs", {
   color: text("color").notNull(),
   type: text("type").notNull(),                 // program-type id from src/lib/program-types.ts
   sources: jsonb("sources").$type<string[]>().notNull().default([]),
+  fplCeiling: integer("fpl_ceiling"),           // % of FPL; null = agency default (organization.csbg_ceiling)
   sort: integer("sort").notNull().default(0),
   active: integer("active").notNull().default(1),
 });

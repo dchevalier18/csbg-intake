@@ -23,11 +23,11 @@ export interface IntakeFieldDef {
 export interface IntakeClientProps {
   lists: Record<string, string[]>;           // answer lists by key
   fields: IntakeFieldDef[];                  // enabled intake fields (characteristics step)
-  programs: Array<{ id: string; name: string }>; // limited to programs assigned to the user
+  programs: Array<{ id: string; name: string; ceiling: number }>; // limited to programs assigned to the user; ceiling = effective FPL % for that program
   requiredDocs: Record<string, string[]>;    // programId → required doc keys
   docTypes: Record<string, string>;          // doc key → label
   fpl: { year: number; base: number; perAdditional: number }; // ACTIVE schedule
-  ceiling: number;                           // org CSBG eligibility ceiling (% of FPL)
+  ceiling: number;                           // org CSBG eligibility ceiling (% of FPL) — fallback before a program is chosen
   user: { id: string; name: string };
   prefill: { first: string; last: string; seminarAttendeeId: string };
 }
@@ -79,11 +79,15 @@ export function IntakeClient({ lists, fields, programs, requiredDocs, docTypes, 
   const normSize = (s: string | number) => Math.min(12, Math.max(1, Math.round(Number(s) || 1)));
   const normIncome = (i: string | number) => Math.max(0, Math.round(Number(i) || 0));
   const annualFor = (size: string | number) => fpl.base + fpl.perAdditional * (normSize(size) - 1);
+  // eligibility is judged against the ENROLLING program's ceiling; before a
+  // program is chosen the preview falls back to the agency-wide default
+  const selectedProgram = programs.find((p) => p.id === f.program);
+  const effCeiling = selectedProgram?.ceiling ?? ceiling;
   const fplPct = f.income !== "" && Number(f.hhSize)
     ? Math.round((normIncome(f.income) / annualFor(f.hhSize)) * 100)
     : null;
   const st = fplPct !== null
-    ? (fplPct <= ceiling
+    ? (fplPct <= effCeiling
       ? { label: fplPct + "% FPL", tone: "sage", eligible: true }
       : fplPct <= 200
         ? { label: fplPct + "% FPL", tone: "amber", eligible: false }
@@ -192,7 +196,9 @@ export function IntakeClient({ lists, fields, programs, requiredDocs, docTypes, 
                   <span style={{ fontFamily: "var(--font-h1)", fontSize: 40, lineHeight: 1, color: st.eligible ? "#2F5A41" : "var(--calv-red)" }}>{fplPct}%</span>
                   <div style={{ fontSize: 13, lineHeight: 1.5 }}>
                     <strong style={{ fontWeight: 600 }}>of the Federal Poverty Level</strong> — household of {normSize(f.hhSize)}, {fpl.year} guideline {money(annualFor(f.hhSize))}/yr.<br />
-                    {st.eligible ? "Within the CSBG " + ceiling + "% eligibility ceiling." : "Above the CSBG " + ceiling + "% ceiling — intake can continue, but enrollment will require denial + referral or another funding source."}
+                    {st.eligible
+                      ? "Within the " + effCeiling + "% eligibility ceiling" + (selectedProgram ? " for " + selectedProgram.name : "") + "."
+                      : "Above the " + effCeiling + "% ceiling" + (selectedProgram ? " for " + selectedProgram.name : "") + " — intake can continue, but enrollment will require denial + referral or another funding source."}
                     <span style={{ color: "var(--calv-slate-65)" }}> Band: {FPL_BANDS[fplBand(fplPct)]} (D12 — auto-recorded).</span>
                   </div>
                 </div>
@@ -227,6 +233,14 @@ export function IntakeClient({ lists, fields, programs, requiredDocs, docTypes, 
                     ...programs.map((p) => <option key={p.id} value={p.id}>{p.name}</option>),
                   ]}</select>
                 </Field>
+                {selectedProgram ? (
+                  <div className="field"><label>Income eligibility</label>
+                    <div style={{ fontSize: 12.5, color: "var(--calv-slate-65)", lineHeight: 1.5 }}>
+                      This program qualifies households up to <strong style={{ fontWeight: 600, color: "var(--calv-slate)" }}>{selectedProgram.ceiling}% of FPL</strong>{selectedProgram.ceiling !== ceiling ? " (program-specific ceiling)" : " (agency default)"}.
+                      {fplPct !== null ? <> This household is at <strong style={{ fontWeight: 600, color: fplPct <= selectedProgram.ceiling ? "#2F5A41" : "var(--calv-red)" }}>{fplPct}%</strong>.</> : null}
+                    </div>
+                  </div>
+                ) : null}
               </div>
               {f.program ? (
                 <div>
@@ -298,7 +312,7 @@ export function IntakeClient({ lists, fields, programs, requiredDocs, docTypes, 
           {st ? <Panel>
             <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
               <Chip tone={st.tone}>{st.label}</Chip>
-              <span style={{ fontSize: 12, color: "var(--calv-slate-65)" }}>{st.eligible ? "CSBG income-eligible" : `Over ${ceiling}% ceiling`}</span>
+              <span style={{ fontSize: 12, color: "var(--calv-slate-65)" }}>{st.eligible ? "Income-eligible" : `Over ${effCeiling}% ceiling`}</span>
             </div>
           </Panel> : null}
         </div>

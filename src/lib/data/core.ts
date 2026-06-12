@@ -13,6 +13,14 @@ export async function getOrg(): Promise<Organization> {
   return (await db.select().from(t.organization).where(eq(t.organization.id, 1)))[0]!;
 }
 
+/** Effective FPL eligibility ceiling (% of FPL) for a program — the program's
+    own override when set, otherwise the agency-wide CSBG ceiling. */
+export async function programCeiling(programId: string): Promise<number> {
+  const row = (await db.select({ fplCeiling: t.programs.fplCeiling })
+    .from(t.programs).where(eq(t.programs.id, programId)))[0];
+  return row?.fplCeiling ?? (await getOrg()).csbgCeiling;
+}
+
 export async function getStaff(): Promise<User[]> {
   return db.select().from(t.users).where(eq(t.users.active, 1)).orderBy(asc(t.users.name));
 }

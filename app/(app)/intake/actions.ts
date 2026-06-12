@@ -7,7 +7,7 @@ import { eq } from "drizzle-orm";
 import { db, t } from "@/db";
 import { requireUser } from "@/lib/auth";
 import { audit, userCanSeeProgram, visibleProgramIds } from "@/lib/access";
-import { getEnabledIntakeFields, getOrg, nextApplicationId, requiredDocKeys } from "@/lib/data/core";
+import { getEnabledIntakeFields, nextApplicationId, programCeiling, requiredDocKeys } from "@/lib/data/core";
 import { getActiveFpl, fplStatusFor } from "@/lib/fpl";
 import { todayIso } from "@/lib/format";
 
@@ -78,11 +78,13 @@ export async function submitIntake(payload: IntakePayload): Promise<{ ok: false;
     return { ok: false, message: "You don't have access to enroll clients into that program." };
   }
 
-  const org = await getOrg();
+  // eligibility is judged against the ENROLLING program's ceiling (program
+  // override when set, agency-wide CSBG ceiling otherwise)
+  const ceiling = await programCeiling(payload.programId);
   const active = await getActiveFpl(); // NEW intakes always pin the ACTIVE schedule year
   const hhSize = Math.min(12, Math.max(1, Math.round(Number(payload.hhSize) || 1)));
   const income = Math.max(0, Math.round(Number(payload.income) || 0));
-  const st = await fplStatusFor(income, hhSize, active.year, org.csbgCeiling);
+  const st = await fplStatusFor(income, hhSize, active.year, ceiling);
 
   // split characteristic answers: builtin field ids are application columns,
   // everything else lands in the `custom` JSON blob
@@ -133,7 +135,7 @@ export async function submitIntake(payload: IntakePayload): Promise<{ ok: false;
     notes: "New intake by " + user.name + ". " +
       (st.eligible
         ? "Income-eligible at intake."
-        : `⚠ Income above ${org.csbgCeiling}% FPL ceiling — flag for review.`),
+        : `⚠ Income above the ${ceiling}% FPL ceiling — flag for review.`),
     portalToken,
   });
 
