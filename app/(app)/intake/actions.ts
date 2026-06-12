@@ -2,7 +2,6 @@
 
 import crypto from "node:crypto";
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
 import { eq } from "drizzle-orm";
 import { db, t } from "@/db";
 import { requireUser } from "@/lib/auth";
@@ -66,8 +65,10 @@ export interface IntakePayload {
   seminarAttendeeId: string;
 }
 
-/** Create the application in the eligibility queue ('docs' stage) and redirect there. */
-export async function submitIntake(payload: IntakePayload): Promise<{ ok: false; message: string }> {
+/** Create the application in the eligibility queue ('docs' stage). Returns the new
+    application id — the client then uploads any attached document scans one at a
+    time (via the eligibility attach action) before navigating to the queue. */
+export async function submitIntake(payload: IntakePayload): Promise<{ ok: true; id: string } | { ok: false; message: string }> {
   const user = await requireUser();
 
   if (!payload.first.trim() || !payload.last.trim() || !payload.dob) {
@@ -164,5 +165,5 @@ export async function submitIntake(payload: IntakePayload): Promise<{ ok: false;
   await audit(user.id, "application.create", "application", id,
     `${payload.first.trim()} ${payload.last.trim()} → ${payload.programId} (${st.pct}% FPL, ${active.year} guideline)`);
   revalidatePath("/eligibility");
-  redirect("/eligibility");
+  return { ok: true, id };
 }

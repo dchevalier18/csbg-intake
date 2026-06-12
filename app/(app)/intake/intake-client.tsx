@@ -1,6 +1,7 @@
 "use client";
 /* Intake wizard — guided new-client intake with FPL calc, dup detection, completeness meter */
 import { useEffect, useRef, useState, useTransition, type ReactNode } from "react";
+import { useRouter } from "next/navigation";
 import { Chip, Field, PageHead, Panel } from "@/components/ui";
 import { I } from "@/components/icons";
 import { useToast } from "@/components/toast";
@@ -8,6 +9,18 @@ import { money } from "@/lib/format";
 import { FPL_BANDS, fplBand } from "@/lib/csbg-catalog";
 import { CSBG_CORE } from "@/lib/completeness";
 import { checkDuplicates, submitIntake, type DupMatch } from "./actions";
+import { attachApplicationDoc } from "../eligibility/actions";
+
+const UPLOAD_ACCEPT = ".pdf,.jpg,.jpeg,.png,.heic,.tif,.tiff";
+const MAX_UPLOAD_BYTES = 4 * 1024 * 1024;
+
+const fileToBase64 = (file: File): Promise<string> =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result ?? "").split(",")[1] ?? "");
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
 
 const INTAKE_STEPS = ["Identity", "Household", "Income", "Characteristics", "Program & docs", "Review"];
 
@@ -37,6 +50,7 @@ const parseFieldOptions = (fd: IntakeFieldDef) =>
 
 export function IntakeClient({ lists, fields, programs, requiredDocs, docTypes, fpl, ceiling, prefill }: IntakeClientProps) {
   const toast = useToast();
+  const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [step, setStep] = useState(0);
   const listValues = (key: string | null | undefined) => (key ? lists[key] ?? [] : []);
@@ -49,7 +63,35 @@ export function IntakeClient({ lists, fields, programs, requiredDocs, docTypes, 
     program: "",
   }));
   const [docs, setDocs] = useState<Record<string, boolean>>({});
+  // optional scans attached during intake — uploaded right after the application is created
+  const [docFiles, setDocFiles] = useState<Record<string, File>>({});
+  const fileRef = useRef<HTMLInputElement>(null);
+  const pickKey = useRef<string | null>(null);
   const set = (k: string, v: string) => setF((prev) => ({ ...prev, [k]: v }));
+
+  function pickFile(key: string) {
+    pickKey.current = key;
+    fileRef.current?.click();
+  }
+  function onFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    const key = pickKey.current;
+    e.target.value = "";
+    if (!file || !key) return;
+    if (file.size > MAX_UPLOAD_BYTES) {
+      toast("Files up to 4 MB are supported — scan at a lower resolution or split the document.");
+      return;
+    }
+    setDocFiles((prev) => ({ ...prev, [key]: file }));
+    setDocs((prev) => ({ ...prev, [key]: true })); // a scan in hand IS the document, submitted today
+  }
+  function removeFile(key: string) {
+    setDocFiles((prev) => {
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  }
 
   // duplicate detection — debounced agency-wide server lookup
   const [dupes, setDupes] = useState<DupMatch[]>([]);
@@ -113,10 +155,23 @@ export function IntakeClient({ lists, fields, programs, requiredDocs, docTypes, 
         income: Number(f.income), incomeSrc: f.incomeSrc,
         characteristics: Object.fromEntries(fields.map((fd) => [fd.id, f[fd.id] || ""])),
         programId: f.program,
-        docs: Object.fromEntries(reqDocs.map((k) => [k, !!docs[k]])),
+        docs: Object.fromEntries(reqDocs.map((k) => [k, !!docs[k] || !!docFiles[k]])),
         seminarAttendeeId: prefill.seminarAttendeeId,
       });
-      if (res && !res.ok) toast(res.message);
+      if (!res.ok) { toast(res.message); return; }
+      // upload attached scans one at a time — each call stays well under the
+      // action body limit; a failed upload never loses the application (the
+      // scan can be re-attached from the eligibility queue)
+      for (const key of reqDocs.filter((k) => docFiles[k])) {
+        const file = docFiles[key];
+        try {
+          const up = await attachApplicationDoc(res.id, key, file.name, await fileToBase64(file));
+          if (!up.ok) toast(`${docTypes[key]}: ${up.message}`);
+        } catch {
+          toast(`${docTypes[key]}: upload failed — re-attach it from the eligibility queue.`);
+        }
+      }
+      router.push("/eligibility");
     });
   }
 
@@ -247,15 +302,32 @@ export function IntakeClient({ lists, fields, programs, requiredDocs, docTypes, 
                   <h3 className="calv-label" style={{ marginBottom: 10 }}>Required documents — check what the client brought today</h3>
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                     {reqDocs.map((k) => (
-                      <label key={k} style={{ display: "flex", gap: 10, alignItems: "center", padding: "10px 12px", border: "1px solid var(--calv-slate-15)", borderRadius: 4, fontSize: 13, cursor: "pointer" }}>
-                        <input type="checkbox" checked={!!docs[k]} onChange={(e) => setDocs({ ...docs, [k]: e.target.checked })} style={{ width: 16, height: 16, accentColor: "var(--calv-red)" }} />
-                        {docTypes[k]}
-                        {docs[k] ? <Chip tone="teal">Submitted today</Chip> : <Chip tone="amber">Will follow</Chip>}
-                      </label>
+                      <div key={k} style={{ padding: "10px 12px", border: "1px solid var(--calv-slate-15)", borderRadius: 4, fontSize: 13 }}>
+                        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                          <label style={{ display: "flex", gap: 10, alignItems: "center", flex: 1, cursor: "pointer" }}>
+                            <input type="checkbox" checked={!!docs[k]} onChange={(e) => setDocs({ ...docs, [k]: e.target.checked })} style={{ width: 16, height: 16, accentColor: "var(--calv-red)" }} />
+                            {docTypes[k]}
+                            {docs[k] ? <Chip tone="teal">Submitted today</Chip> : <Chip tone="amber">Will follow</Chip>}
+                          </label>
+                          {!docFiles[k] ? (
+                            <button type="button" className="calv-btn calv-btn--quiet calv-btn--sm" onClick={() => pickFile(k)} title="Optional — attach the scanned document now instead of from the eligibility queue">
+                              <I name="upload" size={13} /> Attach scan
+                            </button>
+                          ) : null}
+                        </div>
+                        {docFiles[k] ? (
+                          <div style={{ marginTop: 7, paddingLeft: 26, display: "flex", gap: 10, alignItems: "center", fontSize: 11.5, color: "var(--calv-slate-65)" }}>
+                            <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><I name="doc" size={12} /> {docFiles[k].name}</span>
+                            <span>· uploads on submit</span>
+                            <button type="button" className="calv-btn calv-btn--quiet calv-btn--sm" onClick={() => removeFile(k)} title="Remove the attached file"><I name="x" size={11} /> Remove</button>
+                          </div>
+                        ) : null}
+                      </div>
                     ))}
                   </div>
+                  <input type="file" ref={fileRef} style={{ display: "none" }} accept={UPLOAD_ACCEPT} onChange={onFile} />
                   <p style={{ fontSize: 12, color: "var(--calv-slate-65)", marginTop: 12 }}>
-                    Missing documents don&apos;t block intake — the application waits in the eligibility queue and the client can upload from their phone via the self-service portal.
+                    Attaching scans here is optional — missing documents don&apos;t block intake. The application waits in the eligibility queue, where staff can attach files later or the client can upload from their phone via the self-service portal.
                   </p>
                 </div>
               ) : null}
@@ -269,7 +341,8 @@ export function IntakeClient({ lists, fields, programs, requiredDocs, docTypes, 
                 ["Household", (f.hhType || "—") + " · " + f.hhSize], ["Housing", f.housing || "—"],
                 ["Income", f.income !== "" ? money(Number(f.income)) + "/yr · " + fplPct + "% FPL" : "—"],
                 ["Program", f.program ? (programs.find((p) => p.id === f.program)?.name ?? "—") : "—"],
-                ["Docs in hand", reqDocs.filter((k) => docs[k]).length + " of " + reqDocs.length]] as Array<[string, string]>).map(([k, v]) => (
+                ["Docs in hand", reqDocs.filter((k) => docs[k] || docFiles[k]).length + " of " + reqDocs.length +
+                  (reqDocs.some((k) => docFiles[k]) ? " (" + reqDocs.filter((k) => docFiles[k]).length + " scanned)" : "")]] as Array<[string, string]>).map(([k, v]) => (
                   <div key={k} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid var(--calv-slate-15)", fontSize: 13 }}>
                     <span style={{ color: "var(--calv-slate-65)" }}>{k}</span><span style={{ fontWeight: 600, textAlign: "right" }}>{v}</span>
                   </div>
