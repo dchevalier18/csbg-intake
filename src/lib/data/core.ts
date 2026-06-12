@@ -58,6 +58,28 @@ export async function listValuesFor(key: string): Promise<string[]> {
   return rows.map((v) => v.value);
 }
 
+// ---------- service taxonomy ----------
+export async function getActiveServices() {
+  return db.select().from(t.services).where(eq(t.services.active, 1)).orderBy(asc(t.services.sort));
+}
+
+/** Per-program service restrictions. Only programs with a configured (limited)
+    list appear as keys — a program absent from the record offers the full
+    catalog. Shape is plain-serializable so pages can pass it to client props. */
+export async function programServiceRestrictions(): Promise<Record<string, string[]>> {
+  const rows = await db.select().from(t.programServices);
+  const out: Record<string, string[]> = {};
+  for (const r of rows) (out[r.programId] ??= []).push(r.code);
+  return out;
+}
+
+/** Is a service code offered by a program? (No restriction rows = full catalog.) */
+export async function serviceAllowedForProgram(code: string, programId: string): Promise<boolean> {
+  const rows = await db.select().from(t.programServices)
+    .where(eq(t.programServices.programId, programId));
+  return rows.length === 0 || rows.some((r) => r.code === code);
+}
+
 // ---------- documents ----------
 export async function getDocTypes(): Promise<Record<string, string>> {
   return Object.fromEntries((await db.select().from(t.docTypes)).map((d) => [d.key, d.label]));

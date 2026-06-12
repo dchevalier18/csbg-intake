@@ -1,8 +1,8 @@
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, asc } from "drizzle-orm";
 import { db, t } from "@/db";
 import { requireUser } from "@/lib/auth";
 import { visibleClient, visibleProgramIds, getPrograms } from "@/lib/access";
-import { getOrg, getEnabledIntakeFields, listValuesFor } from "@/lib/data/core";
+import { getOrg, getEnabledIntakeFields, listValuesFor, programServiceRestrictions } from "@/lib/data/core";
 import { fplStatusFor } from "@/lib/fpl";
 import { completenessItems } from "@/lib/completeness";
 import { fnpiByCode, serviceByCode } from "@/lib/csbg-catalog";
@@ -78,6 +78,14 @@ export default async function ClientProfilePage({ params }: { params: Promise<{ 
     };
   }));
 
+  // service taxonomy from the services table — active rows feed the log-service
+  // picker; the full set (incl. retired/custom codes) backs the history labels
+  const allServices = await db.select().from(t.services).orderBy(asc(t.services.sort));
+  const serviceByCodeDb = new Map(allServices.map((s) => [s.code, s]));
+  const staffInitials = new Map(
+    (await db.select({ id: t.users.id, initials: t.users.initials }).from(t.users)).map((u) => [u.id, u.initials]),
+  );
+
   // service history is scoped to the viewer's assigned programs — a multi-program
   // client must not leak entries from programs the viewer can't see
   const viewerPrograms = await visibleProgramIds(user);
@@ -88,9 +96,12 @@ export default async function ClientProfilePage({ params }: { params: Promise<{ 
     .map((s) => ({
       id: s.id,
       code: s.code,
-      label: serviceByCode(s.code)?.label ?? s.code,
+      label: serviceByCodeDb.get(s.code)?.label ?? serviceByCode(s.code)?.label ?? s.code,
       date: shortDate(s.date),
       note: s.note,
+      programShort: allPrograms.get(s.programId)?.short ?? s.programId,
+      staffInitials: staffInitials.get(s.staffId) ?? s.staffId.toUpperCase(),
+      fileName: s.fileName,
     }));
 
   // recorded FNPI outcomes — same scoping rules as service history
@@ -107,10 +118,12 @@ export default async function ClientProfilePage({ params }: { params: Promise<{ 
       note: o.note,
     }));
 
-  // programs the recorder can attribute an outcome to (client's enrollments ∩ viewer scope)
+  // programs the recorder can attribute an outcome or service to (client's enrollments ∩ viewer scope)
   const outcomePrograms = c.programIds
     .filter((pid) => viewerPrograms.has(pid))
     .map((pid) => ({ id: pid, short: allPrograms.get(pid)?.short ?? pid }));
+
+  const restrictions = await programServiceRestrictions();
 
   return (
     <ClientProfile
@@ -133,6 +146,8 @@ export default async function ClientProfilePage({ params }: { params: Promise<{ 
       characteristics={characteristics}
       gaps={gaps}
       services={services}
+      serviceOptions={allServices.filter((s) => s.active === 1).map((s) => ({ code: s.code, domain: s.domain, label: s.label }))}
+      restrictions={restrictions}
       outcomes={outcomes}
       outcomePrograms={outcomePrograms}
       followUp={{

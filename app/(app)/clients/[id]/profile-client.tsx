@@ -1,6 +1,6 @@
 "use client";
-/* Client 360° profile — interactive shell (follow-up + capture-now + record-outcome modals). */
-import { useState, useTransition } from "react";
+/* Client 360° profile — interactive shell (follow-up + capture-now + log-service + record-outcome modals). */
+import { useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { Chip, CodeChip, Field, Panel, ProgramDot } from "@/components/ui";
 import { Modal, Seg } from "@/components/ui-client";
@@ -8,12 +8,25 @@ import { useToast } from "@/components/toast";
 import { I } from "@/components/icons";
 import { DOMAINS, FNPIS } from "@/lib/csbg-catalog";
 import { scheduleFollowUp, captureFields, recordOutcome } from "./actions";
+import { addServiceEntry } from "../../services/actions";
+import { servicesForProgram, fileToBase64, UPLOAD_ACCEPT, type ServiceOption } from "../../services/services-client";
 
 export interface GapField {
   id: string;
   label: string;
   type: string;             // 'list' | 'choice' | 'yesno' | 'text' | 'number' | 'date'
   options?: string[];
+}
+
+export interface ServiceRow {
+  id: number;
+  code: string;
+  label: string;
+  date: string;
+  note: string;
+  programShort: string;
+  staffInitials: string;
+  fileName: string | null;
 }
 
 export interface OutcomeRow {
@@ -28,14 +41,16 @@ export interface OutcomeRow {
 const OUTCOME_STATUS_OPTIONS = ["Achieved", "Working toward"];
 const fnpiDomains = DOMAINS.filter((d) => FNPIS.some((f) => f.domain === d.id));
 
-export function ClientProfile({ client, status, programs, completeness, characteristics, gaps, services, outcomes, outcomePrograms, followUp }: {
+export function ClientProfile({ client, status, programs, completeness, characteristics, gaps, services, serviceOptions, restrictions, outcomes, outcomePrograms, followUp }: {
   client: { id: string; first: string; last: string; enrolledLong: string; address: string; phone: string | null };
   status: { tone: string; label: string; eligible: boolean; guidelines: string };
   programs: { color: string; short: string }[];
   completeness: number;
   characteristics: Array<[string, string]>;
   gaps: GapField[];
-  services: { id: number; code: string; label: string; date: string; note: string }[];
+  services: ServiceRow[];
+  serviceOptions: ServiceOption[];
+  restrictions: Record<string, string[]>;
   outcomes: OutcomeRow[];
   outcomePrograms: { id: string; short: string }[];
   followUp: { dueSub?: string; body: string; defaultDate: string };
@@ -45,12 +60,20 @@ export function ClientProfile({ client, status, programs, completeness, characte
   const [showSchedule, setShowSchedule] = useState(false);
   const [showCapture, setShowCapture] = useState(false);
   const [showOutcome, setShowOutcome] = useState(false);
+  const [showLog, setShowLog] = useState(false);
+  const [viewService, setViewService] = useState<ServiceRow | null>(null);
   const [date, setDate] = useState(followUp.defaultDate);
   const [vals, setVals] = useState<Record<string, string>>({});
   const [fnpiCode, setFnpiCode] = useState("");
   const [fnpiProgram, setFnpiProgram] = useState(outcomePrograms[0]?.id ?? "");
   const [fnpiStatus, setFnpiStatus] = useState(OUTCOME_STATUS_OPTIONS[0]);
   const [fnpiNote, setFnpiNote] = useState("");
+  // log-service modal state
+  const [svcCode, setSvcCode] = useState("");
+  const [svcProgram, setSvcProgram] = useState(outcomePrograms[0]?.id ?? "");
+  const [svcNote, setSvcNote] = useState("");
+  const [svcFile, setSvcFile] = useState<File | null>(null);
+  const svcFileRef = useRef<HTMLInputElement>(null);
 
   const submitSchedule = () => {
     startTransition(async () => {
@@ -66,6 +89,29 @@ export function ClientProfile({ client, status, programs, completeness, characte
       toast(res.message);
       if (res.ok) { setShowCapture(false); setVals({}); }
     });
+  };
+
+  const submitService = () => {
+    startTransition(async () => {
+      const attachment = svcFile ? { name: svcFile.name, base64: await fileToBase64(svcFile) } : null;
+      const res = await addServiceEntry({ clientId: client.id, code: svcCode, programId: svcProgram, note: svcNote, attachment });
+      toast(res.message);
+      if (res.ok) {
+        setShowLog(false);
+        setSvcCode(""); setSvcNote(""); setSvcFile(null);
+        if (svcFileRef.current) svcFileRef.current.value = "";
+      }
+    });
+  };
+
+  const onSvcFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0] ?? null;
+    if (f && f.size > 4 * 1024 * 1024) {
+      toast("Files up to 4 MB are supported — scan at a lower resolution or split the document.");
+      e.target.value = "";
+      return;
+    }
+    setSvcFile(f);
   };
 
   const submitOutcome = () => {
@@ -98,7 +144,7 @@ export function ClientProfile({ client, status, programs, completeness, characte
           </div>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
-          <Link className="calv-btn calv-btn--secondary calv-btn--sm" style={{ textDecoration: "none" }} href={`/services?client=${client.id}`}><I name="plus" size={13} /> Log service</Link>
+          <button className="calv-btn calv-btn--secondary calv-btn--sm" onClick={() => setShowLog(true)}><I name="plus" size={13} /> Log service</button>
           <button className="calv-btn calv-btn--ghost calv-btn--sm" onClick={() => setShowSchedule(true)}><I name="cal" size={13} /> Schedule follow-up</button>
         </div>
       </div>
@@ -131,13 +177,16 @@ export function ClientProfile({ client, status, programs, completeness, characte
         </Panel>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 13 }}>
-          <Panel title="Service history" sub={services.length + (services.length === 1 ? " entry" : " entries") + " this FY (most recent first)"}>
+          <Panel title="Service history" sub={services.length + (services.length === 1 ? " entry" : " entries") + " this FY (most recent first) — click an entry for the note & attachment"}>
             {services.length === 0 ? <div className="empty" style={{ padding: 20 }}>No services logged yet this FY.</div> :
               services.map((s) => (
-                <div key={s.id} style={{ padding: "10px 2px", borderBottom: "1px solid var(--calv-slate-15)" }}>
+                <div key={s.id} role="button" tabIndex={0} onClick={() => setViewService(s)}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setViewService(s); } }}
+                  style={{ padding: "10px 2px", borderBottom: "1px solid var(--calv-slate-15)", cursor: "pointer" }}>
                   <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 4 }}>
                     <span style={{ fontWeight: 600, fontSize: 13 }}>{s.label}</span>
                     <CodeChip code={s.code} />
+                    {s.fileName ? <I name="clip" size={12} style={{ color: "var(--calv-slate-65)" }} /> : null}
                     <span style={{ marginLeft: "auto", fontSize: 11.5, color: "var(--calv-slate-65)" }}>{s.date}</span>
                   </div>
                   <div style={{ fontSize: 12.5, color: "var(--calv-slate-65)" }}>{s.note}</div>
@@ -219,6 +268,96 @@ export function ClientProfile({ client, status, programs, completeness, characte
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 18 }}>
             <button className="calv-btn calv-btn--quiet calv-btn--sm" onClick={() => setShowCapture(false)}>Cancel</button>
             <button className="calv-btn calv-btn--primary calv-btn--sm" disabled={pending} onClick={submitCapture}>Save to record</button>
+          </div>
+        </Modal>
+      ) : null}
+
+      {showLog ? (
+        <Modal title={`Log a service for ${client.first} ${client.last}`} width={520} onClose={() => setShowLog(false)}>
+          <div className="fgrid">
+            <Field label="Service" required>
+              <select value={svcCode} onChange={(e) => setSvcCode(e.target.value)} autoFocus>
+                <option value="">Select…</option>
+                {DOMAINS.map((d) => {
+                  const group = servicesForProgram(serviceOptions, restrictions, svcProgram).filter((s) => s.domain === d.id);
+                  return group.length ? (
+                    <optgroup key={d.id} label={d.name}>
+                      {group.map((s) => <option key={s.code} value={s.code}>{s.label + "  (" + s.code + ")"}</option>)}
+                    </optgroup>
+                  ) : null;
+                })}
+              </select>
+            </Field>
+            {outcomePrograms.length > 1 ? (
+              <Field label="Program" required>
+                <select value={svcProgram} onChange={(e) => {
+                  const pid = e.target.value;
+                  setSvcProgram(pid);
+                  if (svcCode && !servicesForProgram(serviceOptions, restrictions, pid).some((s) => s.code === svcCode)) setSvcCode("");
+                }}>
+                  {outcomePrograms.map((p) => <option key={p.id} value={p.id}>{p.short}</option>)}
+                </select>
+              </Field>
+            ) : null}
+            <Field label="Note (optional)">
+              <input value={svcNote} onChange={(e) => setSvcNote(e.target.value)} placeholder="What happened?" />
+            </Field>
+            <Field label="Attachment (optional)" hint="Receipt, award letter, signed form … PDF or scanned image, up to 4 MB.">
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <button className="calv-btn calv-btn--quiet calv-btn--sm" onClick={() => svcFileRef.current?.click()}>
+                  <I name="clip" size={13} /> {svcFile ? "Replace file" : "Attach file"}
+                </button>
+                {svcFile ? (
+                  <span style={{ fontSize: 12.5, color: "var(--calv-slate-65)", display: "inline-flex", gap: 6, alignItems: "center", minWidth: 0 }}>
+                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{svcFile.name}</span>
+                    <button className="tlink" style={{ fontSize: 12 }} onClick={() => { setSvcFile(null); if (svcFileRef.current) svcFileRef.current.value = ""; }}>remove</button>
+                  </span>
+                ) : null}
+              </div>
+              <input type="file" ref={svcFileRef} style={{ display: "none" }} accept={UPLOAD_ACCEPT} onChange={onSvcFile} />
+            </Field>
+          </div>
+          {svcCode ? (
+            <p style={{ fontSize: 12, color: "var(--calv-slate-65)", margin: "12px 0 0" }}>
+              Will report as <span className="code-chip">{svcCode}</span> under{" "}
+              <strong style={{ fontWeight: 600 }}>{DOMAINS.find((d) => d.id === serviceOptions.find((s) => s.code === svcCode)?.domain)?.name}</strong> in Module 3, Section A.
+            </p>
+          ) : null}
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 18 }}>
+            <button className="calv-btn calv-btn--quiet calv-btn--sm" onClick={() => setShowLog(false)}>Cancel</button>
+            <button
+              className="calv-btn calv-btn--primary calv-btn--sm"
+              disabled={!svcCode || pending}
+              style={!svcCode || pending ? { opacity: 0.45, cursor: "not-allowed" } : undefined}
+              onClick={submitService}
+            >
+              <I name="plus" size={13} /> Log service
+            </button>
+          </div>
+        </Modal>
+      ) : null}
+
+      {viewService ? (
+        <Modal title={viewService.label} width={480} onClose={() => setViewService(null)}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 14 }}>
+            <CodeChip code={viewService.code} />
+            <Chip outline>{viewService.programShort}</Chip>
+            <Chip outline>{viewService.date}</Chip>
+            <Chip outline>Logged by {viewService.staffInitials}</Chip>
+          </div>
+          <div className="calv-label" style={{ marginBottom: 4 }}>Note</div>
+          <p style={{ fontSize: 13, lineHeight: 1.6, margin: "0 0 16px" }}>{viewService.note || "—"}</p>
+          <div className="calv-label" style={{ marginBottom: 4 }}>Attachment</div>
+          {viewService.fileName ? (
+            <a className="tlink" href={`/services/file/${viewService.id}`} target="_blank" rel="noreferrer"
+              style={{ display: "inline-flex", gap: 7, alignItems: "center", fontSize: 13 }}>
+              <I name="clip" size={14} /> {viewService.fileName}
+            </a>
+          ) : (
+            <p style={{ fontSize: 12.5, color: "var(--calv-slate-65)", margin: 0 }}>No file attached to this entry.</p>
+          )}
+          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 18 }}>
+            <button className="calv-btn calv-btn--quiet calv-btn--sm" onClick={() => setViewService(null)}>Close</button>
           </div>
         </Modal>
       ) : null}

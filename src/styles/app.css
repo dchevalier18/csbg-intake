@@ -137,8 +137,9 @@ td.num{font-family:var(--font-h1);font-size:15px;letter-spacing:.01em}
 .bar-h .track i{display:block;height:100%;background:var(--calv-teal)}
 .bar-h .v{font-family:var(--font-h1);font-size:13px;text-align:right}
 .kbd-hint{font-size:11px;color:var(--calv-slate-65)}
-a.tlink{color:var(--calv-teal);text-decoration:underline;text-underline-offset:3px;cursor:pointer}
-a.tlink:hover{color:var(--calv-red)}
+a.tlink,button.tlink{color:var(--calv-teal);text-decoration:underline;text-underline-offset:3px;cursor:pointer}
+button.tlink{background:none;border:0;padding:0;font:inherit}
+a.tlink:hover,button.tlink:hover{color:var(--calv-red)}
 
 /* ---------- Login ---------- */
 .login-wrap{min-height:100vh;display:grid;grid-template-columns:1fr 1fr;background:#F4F4F2}

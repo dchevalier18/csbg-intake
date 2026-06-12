@@ -167,6 +167,13 @@ export const services = pgTable("services", {
   sort: integer("sort").notNull().default(0),
 });
 
+// Per-program service availability. A program with NO rows here offers the full
+// catalog (default); rows restrict its pickers to the listed codes.
+export const programServices = pgTable("program_services", {
+  programId: text("program_id").notNull(),
+  code: text("code").notNull(),
+}, (t) => [primaryKey({ columns: [t.programId, t.code] })]);
+
 export const serviceLog = pgTable("service_log", {
   id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   date: text("date").notNull(),
@@ -175,6 +182,9 @@ export const serviceLog = pgTable("service_log", {
   programId: text("program_id").notNull(),
   staffId: text("staff_id").notNull(),
   note: text("note").notNull().default(""),
+  // optional supporting attachment (receipt, award letter, signed form …)
+  fileName: text("file_name"),                  // original filename, shown in the UI
+  filePath: text("file_path"),                  // stored copy, relative to data/uploads/
 });
 
 // ---------- Federal Poverty Guidelines (versioned, point-in-time pinning) ----------

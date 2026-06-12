@@ -56,6 +56,22 @@ async function main(): Promise<void> {
   }).returning({ id: t.serviceLog.id });
   check("identity id assigned on insert", Number.isInteger(inserted[0]?.id) && inserted[0].id > 0, `id ${inserted[0]?.id}`);
 
+  // service-log attachment columns (file_name / file_path)
+  const withFile = await db.insert(t.serviceLog).values({
+    date: "2026-06-11", clientId: clients[0].id, code: "SRV 4e", programId: "cad-a", staffId: "dr",
+    note: "smoke attachment", fileName: "receipt.pdf", filePath: "service-log/C-1/svc-1.pdf",
+  }).returning({ id: t.serviceLog.id, fileName: t.serviceLog.fileName });
+  check("service_log attachment columns roundtrip", withFile[0]?.fileName === "receipt.pdf");
+
+  // per-program service availability (program_services)
+  await db.insert(t.programServices).values([
+    { programId: "cad-a", code: "SDA 1a" },
+    { programId: "cad-a", code: "SRV 4e" },
+  ]);
+  const psRows = await db.select().from(t.programServices).where(eq(t.programServices.programId, "cad-a"));
+  check("program_services roundtrip", psRows.length === 2, `got ${psRows.length}`);
+  await db.delete(t.programServices).where(eq(t.programServices.programId, "cad-a"));
+
   // transaction commit + rollback semantics (the approve flow uses a transaction)
   await db.transaction(async (tx) => {
     await tx.insert(t.kv).values({ key: "smoke", value: { ok: true } });

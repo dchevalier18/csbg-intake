@@ -1,7 +1,8 @@
-import { asc, eq, inArray } from "drizzle-orm";
+import { asc, inArray } from "drizzle-orm";
 import { db, t } from "@/db";
 import { requireUser } from "@/lib/auth";
 import { visibleClients, visiblePrograms } from "@/lib/access";
+import { programServiceRestrictions } from "@/lib/data/core";
 import { DOMAINS, serviceByCode } from "@/lib/csbg-catalog";
 import { PageHead, Restricted } from "@/components/ui";
 import { ServicesClient, type EntryRow } from "./services-client";
@@ -20,12 +21,12 @@ export default async function ServicesPage({ searchParams }: {
   const requested = typeof sp.client === "string" ? sp.client : "";
   const initialClient = clients.some((c) => c.id === requested) ? requested : "";
 
-  // Service taxonomy from the services table (active, in sort order).
-  const services = await db.select().from(t.services)
-    .where(eq(t.services.active, 1))
-    .orderBy(asc(t.services.sort))
-    ;
-  const serviceByCodeDb = new Map(services.map((s) => [s.code, s]));
+  // Service taxonomy from the services table — active rows feed the picker;
+  // the full set (incl. retired/custom codes) backs the display lookup.
+  const allServices = await db.select().from(t.services).orderBy(asc(t.services.sort));
+  const services = allServices.filter((s) => s.active === 1);
+  const serviceByCodeDb = new Map(allServices.map((s) => [s.code, s]));
+  const restrictions = await programServiceRestrictions();
 
   // Recent entries — scoped to visible programs, newest first, cap 50.
   const programIds = programs.map((p) => p.id);
@@ -60,6 +61,7 @@ export default async function ServicesPage({ searchParams }: {
       programColor: p?.color ?? "var(--calv-slate-35)",
       staffInitials: staffInitials.get(e.staffId) ?? e.staffId.toUpperCase(),
       note: e.note,
+      fileName: e.fileName,
     };
   });
 
@@ -76,6 +78,7 @@ export default async function ServicesPage({ searchParams }: {
         domains={DOMAINS.map((d) => ({ id: d.id, name: d.name }))}
         programs={programs.map((p) => ({ id: p.id, short: p.short, color: p.color }))}
         visibleProgramIds={programIds}
+        restrictions={restrictions}
         initialClient={initialClient}
         entries={entries}
       />

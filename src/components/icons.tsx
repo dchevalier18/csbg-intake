@@ -27,6 +27,7 @@ export const ICONS: Record<string, string> = {
   layers: "M12 2l9 5-9 5-9-5 9-5z|M3 12l9 5 9-5|M3 17l9 5 9-5",
   logout: "M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4|M16 17l5-5-5-5|M21 12H9",
   rotate: "M1 4v6h6|M3.51 15a9 9 0 1 0 2.13-9.36L1 10",
+  clip: "M21.4 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57a4 4 0 1 1 5.66 5.66l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48",
 };
 
 export function I({ name, size = 16, style }: { name: string; size?: number; style?: CSSProperties }) {
