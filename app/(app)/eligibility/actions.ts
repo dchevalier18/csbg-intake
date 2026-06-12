@@ -8,8 +8,8 @@ import path from "node:path";
 import { db, t } from "@/db";
 import type { Application, User } from "@/db/schema";
 import { requireUser } from "@/lib/auth";
-import { userCanSeeProgram, audit } from "@/lib/access";
-import { requiredDocKeys, applicationDocsVerified, programCeiling, OPEN_STAGES, nextClientId } from "@/lib/data/core";
+import { getProgram, userCanSeeProgram, audit } from "@/lib/access";
+import { getEnabledIntakeFields, requiredDocKeys, applicationDocsVerified, programCeiling, OPEN_STAGES, nextClientId } from "@/lib/data/core";
 import { fplStatusFor } from "@/lib/fpl";
 import { todayIso } from "@/lib/format";
 
@@ -213,6 +213,132 @@ export async function undoApplicationDocVerification(appId: string, docKey: stri
 
   revalidateQueue();
   return { ok: true, message: "Verification undone — status reset and the sign-off was removed." };
+}
+
+/* ---------- intake-data corrections + program reassignment (open stages only) ---------- */
+
+export interface ApplicationUpdatePayload {
+  first: string;
+  last: string;
+  dob: string;
+  phone: string;
+  address: string;
+  county: string;
+  hhType: string;
+  hhSize: number;
+  housing: string;
+  income: number;
+  incomeSrc: string;
+  /** intake-field values keyed by field id (builtin + custom) */
+  characteristics: Record<string, string>;
+  /** target program — differs from the stored one on reassignment */
+  programId: string;
+}
+
+/** Edit an open application's intake data — nothing is locked once it enters the
+    queue. Reassigning the program re-checks income against the NEW program's
+    ceiling (live everywhere), re-syncs the required-document checklist (verified
+    documents carry over where requirements overlap), and recomputes the stage —
+    a pending decision hand-off does not survive a move. All changes are audited. */
+export async function updateApplication(appId: string, payload: ApplicationUpdatePayload): Promise<ActionResult> {
+  const user = await requireUser();
+  const app = await loadApp(appId);
+  if (!app || !await userCanSeeProgram(user, app.programId) || !(OPEN_STAGES as readonly string[]).includes(app.stage)) {
+    return { ok: false, message: "Application not found or already decided." };
+  }
+  if (!payload.first.trim() || !payload.last.trim() || !payload.dob) {
+    return { ok: false, message: "First name, last name, and date of birth are required." };
+  }
+  const programChanged = payload.programId !== app.programId;
+  if (programChanged) {
+    if (!await userCanSeeProgram(user, payload.programId)) {
+      return { ok: false, message: "You don't have access to move applications into that program." };
+    }
+    const target = await getProgram(payload.programId);
+    if (!target || target.active !== 1) return { ok: false, message: "That program no longer exists." };
+  }
+
+  // same normalization as intake — the stored determination must match the preview
+  const hhSize = Math.min(12, Math.max(1, Math.round(Number(payload.hhSize) || 1)));
+  const income = Math.max(0, Math.round(Number(payload.income) || 0));
+
+  // split characteristic answers exactly like submitIntake
+  const builtinText: Record<string, string | null> = {};
+  let disability: number | null = null;
+  const custom: Record<string, string> = {};
+  for (const fd of await getEnabledIntakeFields()) {
+    const v = (payload.characteristics[fd.id] ?? "").trim();
+    if (fd.builtin === 1) {
+      if (fd.id === "disability") disability = v === "" ? null : v === "Yes" ? 1 : 0;
+      else builtinText[fd.id] = v || null;
+    } else if (v !== "") {
+      custom[fd.id] = v;
+    }
+  }
+
+  const next = {
+    first: payload.first.trim(),
+    last: payload.last.trim(),
+    dob: payload.dob,
+    phone: payload.phone.trim() || null,
+    address: payload.address.trim() || null,
+    county: payload.county || null,
+    sex: builtinText.sex ?? null,
+    race: builtinText.race ?? null,
+    edu: builtinText.edu ?? null,
+    work: builtinText.work ?? null,
+    insurance: builtinText.insurance ?? null,
+    military: builtinText.military ?? null,
+    disability,
+    hhType: payload.hhType || null,
+    hhSize,
+    housing: payload.housing || null,
+    income,
+    incomeSrc: payload.incomeSrc || null,
+    custom,
+    programId: payload.programId,
+  };
+  // changed-field list for the audit trail (eligibility inputs are compliance-sensitive)
+  const changed = (Object.keys(next) as Array<keyof typeof next>)
+    .filter((k) => JSON.stringify(next[k] ?? null) !== JSON.stringify(app[k] ?? null));
+  if (changed.length === 0) return { ok: true, message: "No changes to save." };
+
+  await db.update(t.applications).set(next).where(eq(t.applications.id, appId));
+
+  if (programChanged) {
+    // checklist re-sync: existing rows are KEPT (files and verifications carry
+    // over where the new program shares a requirement); requirements new to the
+    // target program start as 'missing'
+    const have = new Set((await db.select({ docKey: t.applicationDocs.docKey }).from(t.applicationDocs)
+      .where(eq(t.applicationDocs.applicationId, appId))).map((d) => d.docKey));
+    const now = new Date().toISOString();
+    for (const docKey of (await requiredDocKeys(payload.programId)).filter((k) => !have.has(k))) {
+      await db.insert(t.applicationDocs).values({ applicationId: appId, docKey, status: "missing", source: "staff", updatedAt: now });
+    }
+    await audit(user.id, "application.reassign", "application", appId,
+      `Program ${app.programId} → ${payload.programId} by ${user.name} — checklist re-synced`);
+  }
+
+  // recompute the stage under the (possibly new) requirement list. Unlike the
+  // document-action recompute, a reassignment also pulls 'decision' back — the
+  // hand-off belonged to the previous program.
+  const fresh = { ...app, ...next };
+  const all = await applicationDocsVerified(fresh);
+  const newStage = all ? "review" : "docs";
+  const stageMoves = programChanged ? ["docs", "review", "decision"] : ["docs", "review"];
+  if (stageMoves.includes(app.stage) && app.stage !== newStage) {
+    await db.update(t.applications).set({ stage: newStage }).where(eq(t.applications.id, appId));
+  }
+
+  await audit(user.id, "application.update", "application", appId,
+    `Intake data edited by ${user.name}: ${changed.join(", ")}`);
+  revalidateQueue();
+  return {
+    ok: true,
+    message: programChanged
+      ? "Saved — application moved to the new program; eligibility and the document checklist now follow its requirements."
+      : "Intake details updated.",
+  };
 }
 
 /** Stage review → decision (hand off to the program manager). */

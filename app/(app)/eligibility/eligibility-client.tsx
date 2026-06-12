@@ -10,7 +10,24 @@ import { money, shortDate } from "@/lib/format";
 import {
   attachApplicationDoc, verifyApplicationDoc, bypassVerifyApplicationDoc,
   undoApplicationDocVerification, sendForDecision, denyApplication, approveApplication,
+  updateApplication, type ApplicationUpdatePayload,
 } from "./actions";
+
+export interface IntakeFieldDef {
+  id: string;
+  label: string;
+  code: string;
+  type: string;            // 'list' | 'choice' | 'yesno' | 'text' | 'number' | 'date'
+  listKey: string | null;
+  optionsText: string | null;
+  builtin: number;
+}
+
+export interface ProgramOption {
+  id: string;
+  name: string;
+  ceiling: number;         // effective FPL ceiling (%) for this program
+}
 
 export interface AppDocRow {
   key: string;
@@ -36,6 +53,14 @@ export interface AppRow {
   ceiling: number;       // effective FPL ceiling (%) for this application's program
   caseworker: string;
   fpl: { pct: number; label: string; tone: string; eligible: boolean; year: number };
+  /** raw intake answers — drives the editable Intake details view */
+  intake: {
+    first: string; last: string; dob: string; phone: string; address: string;
+    county: string; hhType: string; hhSize: number; housing: string;
+    income: number; incomeSrc: string;
+    characteristics: Record<string, string>;
+    programId: string;
+  };
   docs: AppDocRow[];
 }
 
@@ -60,8 +85,12 @@ const stageOf = (a: AppRow) => STAGES.find((s) => s.id === a.stage) ?? STAGES[0]
 // vacuous truth — zero configured requirements counts as documents-satisfied
 const docsDone = (a: AppRow) => a.docs.every((d) => d.status === "verified");
 
-export default function EligibilityClient({ rows, currentUserName }: {
-  rows: AppRow[]; currentUserName: string;
+export default function EligibilityClient({ rows, currentUserName, lists, fields, programs }: {
+  rows: AppRow[];
+  currentUserName: string;
+  lists: Record<string, string[]>;       // answer lists by key
+  fields: IntakeFieldDef[];              // enabled intake fields (characteristics)
+  programs: ProgramOption[];             // visible programs — reassignment targets
 }) {
   const toast = useToast();
   const [openId, setOpenId] = useState<string | null>(null);
@@ -113,6 +142,12 @@ export default function EligibilityClient({ rows, currentUserName }: {
       const res = decision === "approve" ? await approveApplication(aId) : await denyApplication(aId, note ?? "");
       toast(res.message);
       if (res.ok) setOpenId(null);
+    });
+  }
+  function save(aId: string, payload: ApplicationUpdatePayload) {
+    startTransition(async () => {
+      const res = await updateApplication(aId, payload);
+      toast(res.message);
     });
   }
 
@@ -168,23 +203,31 @@ export default function EligibilityClient({ rows, currentUserName }: {
 
       {open ? (
         <ApplicantModal a={open} currentUserName={currentUserName} onClose={() => setOpenId(null)}
-          attach={attach} verify={verify} bypass={bypass} undo={undo} decide={decide} advance={advance} />
+          lists={lists} fields={fields} programs={programs}
+          attach={attach} verify={verify} bypass={bypass} undo={undo} decide={decide} advance={advance} save={save} />
       ) : null}
     </div>
   );
 }
 
-function ApplicantModal({ a, currentUserName, onClose, attach, verify, bypass, undo, decide, advance }: {
+const MODAL_TABS = ["Documents & decision", "Intake details"];
+
+function ApplicantModal({ a, currentUserName, onClose, lists, fields, programs, attach, verify, bypass, undo, decide, advance, save }: {
   a: AppRow;
   currentUserName: string;
   onClose: () => void;
+  lists: Record<string, string[]>;
+  fields: IntakeFieldDef[];
+  programs: ProgramOption[];
   attach: (aId: string, key: string, file: File) => void;
   verify: (aId: string, key: string) => void;
   bypass: (aId: string, key: string, reason: string) => void;
   undo: (aId: string, key: string) => void;
   decide: (aId: string, decision: "approve" | "deny", note?: string) => void;
   advance: (aId: string) => void;
+  save: (aId: string, payload: ApplicationUpdatePayload) => void;
 }) {
+  const [tab, setTab] = useState(MODAL_TABS[0]);
   const [denyNote, setDenyNote] = useState("");
   const [showDeny, setShowDeny] = useState(false);
   const [bypassKey, setBypassKey] = useState<string | null>(null);
@@ -215,6 +258,14 @@ function ApplicantModal({ a, currentUserName, onClose, attach, verify, bypass, u
         <Chip outline>{st.year} FPL schedule</Chip>
         <Chip outline>Applied {shortDate(a.applied)}</Chip>
       </div>
+
+      <div style={{ marginBottom: 16 }}>
+        <Seg options={MODAL_TABS} value={tab} onChange={setTab} />
+      </div>
+
+      {tab === MODAL_TABS[1] ? (
+        <IntakeDetailsForm a={a} lists={lists} fields={fields} programs={programs} onSave={(p) => save(a.id, p)} />
+      ) : <>
 
       <div style={{ background: "var(--calv-sand-15)", border: "1px solid var(--calv-sand-35)", borderRadius: 4, padding: "12px 14px", fontSize: 13, lineHeight: 1.55, marginBottom: 18 }}>
         <strong style={{ fontWeight: 600 }}>Case worker note —</strong> {a.notes}
@@ -277,7 +328,8 @@ function ApplicantModal({ a, currentUserName, onClose, attach, verify, bypass, u
         </button>
       </div>
       {!ready ? <p style={{ fontSize: 11.5, color: "var(--calv-slate-65)", textAlign: "right", margin: "8px 0 0" }}>Approval unlocks when every document is verified.</p> : null}
-      {ready && !st.eligible ? <p style={{ fontSize: 11.5, color: "#B73719", textAlign: "right", margin: "8px 0 0" }}>Income exceeds this program&apos;s {a.ceiling}% FPL ceiling — approval is blocked; deny with referral, or reassign to a program with a higher ceiling.</p> : null}
+      {ready && !st.eligible ? <p style={{ fontSize: 11.5, color: "#B73719", textAlign: "right", margin: "8px 0 0" }}>Income exceeds this program&apos;s {a.ceiling}% FPL ceiling — approval is blocked; deny with referral, or reassign to a program with a higher ceiling (Intake details tab).</p> : null}
+      </>}
 
       {bypassKey ? (
         <BypassPrompt applicantId={a.id} label={bypassDoc?.label ?? bypassKey} userName={currentUserName}
@@ -285,6 +337,110 @@ function ApplicantModal({ a, currentUserName, onClose, attach, verify, bypass, u
           onConfirm={(reason) => { bypass(a.id, bypassKey, reason); setBypassKey(null); }} />
       ) : null}
     </Modal>
+  );
+}
+
+const parseFieldOptions = (fd: IntakeFieldDef) =>
+  (fd.optionsText || "").split(",").map((s) => s.trim()).filter(Boolean);
+
+/* Editable view of the application's original intake answers. Nothing locks when
+   an application enters the queue — corrections and program reassignment happen
+   here (open stages only; every change is audited server-side). */
+function IntakeDetailsForm({ a, lists, fields, programs, onSave }: {
+  a: AppRow;
+  lists: Record<string, string[]>;
+  fields: IntakeFieldDef[];
+  programs: ProgramOption[];
+  onSave: (payload: ApplicationUpdatePayload) => void;
+}) {
+  const listValues = (key: string | null | undefined) => (key ? lists[key] ?? [] : []);
+  const [e, setE] = useState<Record<string, string>>(() => ({
+    first: a.intake.first, last: a.intake.last, dob: a.intake.dob,
+    phone: a.intake.phone, address: a.intake.address, county: a.intake.county,
+    hhType: a.intake.hhType, hhSize: String(a.intake.hhSize), housing: a.intake.housing,
+    income: String(a.intake.income), incomeSrc: a.intake.incomeSrc,
+    program: a.intake.programId,
+    ...a.intake.characteristics,
+  }));
+  const set = (k: string, v: string) => setE((prev) => ({ ...prev, [k]: v }));
+  const opts = (arr: string[]) => [
+    <option key="" value="">Select…</option>,
+    ...arr.map((o) => <option key={o} value={o}>{o}</option>),
+  ];
+
+  const moved = e.program !== a.intake.programId;
+  const target = programs.find((p) => p.id === e.program);
+  const canSave = !!(e.first.trim() && e.last.trim() && e.dob && e.program);
+
+  function submit() {
+    if (!canSave) return;
+    onSave({
+      first: e.first, last: e.last, dob: e.dob, phone: e.phone, address: e.address, county: e.county,
+      hhType: e.hhType, hhSize: Number(e.hhSize), housing: e.housing,
+      income: Number(e.income), incomeSrc: e.incomeSrc,
+      characteristics: Object.fromEntries(fields.map((fd) => [fd.id, e[fd.id] || ""])),
+      programId: e.program,
+    });
+  }
+
+  return (
+    <div>
+      <h3 className="calv-label" style={{ fontSize: 12, marginBottom: 10 }}>Identity &amp; household · {a.id}</h3>
+      <div className="fgrid c2" style={{ marginBottom: 18 }}>
+        <Field label="First name" required><input value={e.first} onChange={(ev) => set("first", ev.target.value)} /></Field>
+        <Field label="Last name" required><input value={e.last} onChange={(ev) => set("last", ev.target.value)} /></Field>
+        <Field label="Date of birth" required><input type="date" value={e.dob} onChange={(ev) => set("dob", ev.target.value)} /></Field>
+        <Field label="Phone"><input value={e.phone} onChange={(ev) => set("phone", ev.target.value)} placeholder="(610) 555-0100" /></Field>
+        <Field label="Street address" span={2}><input value={e.address} onChange={(ev) => set("address", ev.target.value)} placeholder="Street, city, ZIP" /></Field>
+        <Field label="County"><select value={e.county} onChange={(ev) => set("county", ev.target.value)}>{opts(listValues("county"))}</select></Field>
+        <Field label="Household type (D9)"><select value={e.hhType} onChange={(ev) => set("hhType", ev.target.value)}>{opts(listValues("hhType"))}</select></Field>
+        <Field label="Household size (D10)"><input type="number" min="1" max="12" value={e.hhSize} onChange={(ev) => set("hhSize", ev.target.value)} /></Field>
+        <Field label="Housing situation (D11)"><select value={e.housing} onChange={(ev) => set("housing", ev.target.value)}>{opts(listValues("housing"))}</select></Field>
+        <Field label="Total annual household income" hint="Changing income re-checks eligibility instantly"><input type="number" min="0" value={e.income} onChange={(ev) => set("income", ev.target.value)} placeholder="$" /></Field>
+        <Field label="Income sources (D13)"><select value={e.incomeSrc} onChange={(ev) => set("incomeSrc", ev.target.value)}>{opts(listValues("incomeSrc"))}</select></Field>
+      </div>
+
+      {fields.length > 0 ? <>
+        <h3 className="calv-label" style={{ fontSize: 12, marginBottom: 10 }}>Characteristics</h3>
+        <div className="fgrid c2" style={{ marginBottom: 18 }}>
+          {fields.map((fd) => (
+            <Field key={fd.id} label={fd.label + (fd.code ? " (" + fd.code + ")" : "")}>
+              {fd.type === "list" ? <select value={e[fd.id] || ""} onChange={(ev) => set(fd.id, ev.target.value)}>{opts(listValues(fd.listKey))}</select>
+                : fd.type === "choice" ? <select value={e[fd.id] || ""} onChange={(ev) => set(fd.id, ev.target.value)}>{opts(parseFieldOptions(fd))}</select>
+                  : fd.type === "yesno" ? <select value={e[fd.id] || ""} onChange={(ev) => set(fd.id, ev.target.value)}>{opts(["No", "Yes"])}</select>
+                    : fd.type === "number" ? <input type="number" value={e[fd.id] || ""} onChange={(ev) => set(fd.id, ev.target.value)} />
+                      : fd.type === "date" ? <input type="date" value={e[fd.id] || ""} onChange={(ev) => set(fd.id, ev.target.value)} />
+                        : <input value={e[fd.id] || ""} onChange={(ev) => set(fd.id, ev.target.value)} />}
+            </Field>
+          ))}
+        </div>
+      </> : null}
+
+      <h3 className="calv-label" style={{ fontSize: 12, marginBottom: 10 }}>Program assignment</h3>
+      <div style={{ marginBottom: 8 }}>
+        <Field label="Enrolling program" hint="Move the application instead of redoing the intake — documents and verifications carry over where requirements overlap">
+          <select value={e.program} onChange={(ev) => set("program", ev.target.value)}>
+            {programs.map((p) => <option key={p.id} value={p.id}>{p.name} — eligible up to {p.ceiling}% FPL</option>)}
+          </select>
+        </Field>
+      </div>
+      {moved && target ? (
+        <div style={{ background: "var(--calv-amber-15)", border: "1px solid var(--calv-amber-35)", borderRadius: 4, padding: "12px 14px", fontSize: 12.5, lineHeight: 1.55, display: "flex", gap: 10, alignItems: "flex-start", marginBottom: 16 }}>
+          <I name="alert" size={16} style={{ color: AMBER_TEXT, marginTop: 1 }} />
+          <span>
+            Saving moves this application to <strong style={{ fontWeight: 600 }}>{target.name}</strong>. Income is re-checked against its <strong style={{ fontWeight: 600 }}>{target.ceiling}% FPL</strong> ceiling (current assessment: {a.fpl.pct}%), the required-document checklist follows the new program, and the stage is recomputed. The move is written to the audit log.
+          </span>
+        </div>
+      ) : null}
+
+      <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", alignItems: "center" }}>
+        <span style={{ fontSize: 11.5, color: "var(--calv-slate-65)", marginRight: "auto" }}>Corrections are audited on the application&apos;s determination record.</span>
+        <button className="calv-btn calv-btn--primary calv-btn--sm" disabled={!canSave}
+          style={!canSave ? { opacity: 0.45, cursor: "not-allowed" } : undefined} onClick={submit}>
+          <I name="check" size={14} /> {moved ? "Save & move application" : "Save changes"}
+        </button>
+      </div>
+    </div>
   );
 }
 
