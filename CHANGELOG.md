@@ -6,6 +6,40 @@ tracks a federal instrument or guideline revision) are marked **[compliance]**
 
 ## Unreleased — 0.5.0 (roadmap Phases 1–5)
 
+### Program tools become manageable (post-Phase 5)
+Every program-type tool can now create and manage its own records instead of
+only displaying seeded data:
+
+- **Pantry network**: add and edit member agencies in the tool; new
+  "Pantry member agencies" spreadsheet import template builds or refreshes
+  the roster from Primarius 2.0's agency export (or any CSV/XLSX) — matched
+  by agency ID or name, so re-imports update instead of duplicate. The
+  reporting cycle is no longer pinned to a demo month: it's always the
+  calendar month that just closed, and network KPIs compute live from the
+  tables on real installs.
+- **Volunteers**: add volunteers (name, role, program, low-income flag,
+  optional client link) and edit them in the tool; the existing "Volunteer
+  hours" import is now linked from the roster.
+- **Loan servicing**: loans carry structured terms (APR in basis points,
+  term in months, disbursement date) behind the display strings; each loan
+  has a detail page with a **full amortization schedule** (level-payment,
+  cent-accurate, last installment absorbs rounding) and a **payment ledger**
+  — every payment recorded splits interest-first at one month of the note
+  rate on the open balance, with date, split, running balance, staff, and
+  note. New-loan form takes numeric rate/term so the schedule generates.
+- **Attendance**: multiple classes per agency with a class picker; create
+  classes (site, schedule, service code), enroll students (with optional
+  household-record link), and open today's session on demand — the tap-to-
+  cycle Today column and post-day service logging are unchanged.
+- **Weatherization**: open jobs (household link or name, address, funding,
+  measures) and add contractors (trade, crews, credential expirations) in
+  the tool; contractors with an **expired** credential are blocked from new
+  job assignments. New **Vouchers** tab records contractor expense charges
+  (optionally tied to a job) with a submitted → approved → paid pipeline —
+  approval/payment is admin-only and every step is audited.
+- Housing construction projects intentionally untouched — build-out on hold
+  pending review of the existing production system's implementation.
+
 ### Windows local install (deferred item — §7 local tier, first cut)
 - deploy/windows: dependency-free PowerShell installer (Node check, build,
   embedded database, /setup wizard, start-at-sign-in task) + a console

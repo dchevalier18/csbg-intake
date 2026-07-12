@@ -7,14 +7,9 @@ import { requireUser } from "@/lib/auth";
 import { audit, userHasCap, visibleClient, visibleProgramIds, visiblePrograms } from "@/lib/access";
 import { programType } from "@/lib/program-types";
 import { money, todayIso } from "@/lib/format";
+import { addMonthsIso, allocatePayment } from "@/lib/loan-math";
 
 export interface ActionResult { ok: boolean; message: string }
-
-function addDays(iso: string, days: number): string {
-  const d = new Date(iso + "T12:00:00");
-  d.setDate(d.getDate() + days);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
 
 async function nextLoanId(): Promise<string> {
   let max = 0;
@@ -30,8 +25,8 @@ export interface NewLoanInput {
   clientId: string | null;
   purpose: string;
   principal: number;
-  rate: string;
-  term: string;
+  aprPct: number;      // annual rate as a percent (4.5 = 4.50% APR)
+  termMonths: number;
 }
 
 /** New loan — disburses into the visible loan-fund program; logs SRV 3b when client-linked. */
@@ -46,6 +41,12 @@ export async function createLoan(input: NewLoanInput): Promise<ActionResult> {
   if (!Number.isFinite(input.principal) || input.principal <= 0) {
     return { ok: false, message: "Enter the principal amount." };
   }
+  if (!Number.isFinite(input.aprPct) || input.aprPct < 0 || input.aprPct > 100) {
+    return { ok: false, message: "Enter the annual rate as a percent (0 for interest-free)." };
+  }
+  if (!Number.isInteger(input.termMonths) || input.termMonths <= 0 || input.termMonths > 600) {
+    return { ok: false, message: "Enter the term in months." };
+  }
 
   let clientId: string | null = null;
   if (input.clientId) {
@@ -56,6 +57,7 @@ export async function createLoan(input: NewLoanInput): Promise<ActionResult> {
 
   const id = await nextLoanId();
   const principal = Math.round(input.principal);
+  const rateBps = Math.round(input.aprPct * 100);
   const today = todayIso();
   await db.insert(t.loans).values({
     id,
@@ -65,10 +67,13 @@ export async function createLoan(input: NewLoanInput): Promise<ActionResult> {
     purpose: input.purpose.trim(),
     principal,
     balance: principal,
-    rate: input.rate.trim(),
-    term: input.term.trim(),
+    rate: `${(rateBps / 100).toFixed(rateBps % 100 === 0 ? 0 : 1)}%`,
+    term: `${input.termMonths} mo`,
+    rateBps,
+    termMonths: input.termMonths,
+    originated: today,
     status: "current",
-    nextDue: addDays(today, 30),
+    nextDue: addMonthsIso(today, 1),
     srvCode: "SRV 3b",
   });
 
@@ -94,8 +99,10 @@ export async function createLoan(input: NewLoanInput): Promise<ActionResult> {
   };
 }
 
-/** Record a payment — reduces the balance; at $0 the loan is paid off. */
-export async function recordPayment(loanId: string, amount: number): Promise<ActionResult> {
+/** Record a payment — writes a ledger row with the interest/principal split
+    (interest first, at one month of the loan's rate on the open balance) and
+    reduces the balance; at $0 principal remaining the loan is paid off. */
+export async function recordPayment(loanId: string, amount: number, date?: string, note?: string): Promise<ActionResult> {
   const user = await requireUser();
   if (!await userHasCap(user, "loans")) return { ok: false, message: "No access to loan servicing." };
 
@@ -103,20 +110,39 @@ export async function recordPayment(loanId: string, amount: number): Promise<Act
   if (!loan || !(await visibleProgramIds(user)).has(loan.programId)) return { ok: false, message: "Loan not found." };
   if (loan.status === "paid") return { ok: false, message: "Loan is already paid off." };
   if (!Number.isFinite(amount) || amount <= 0) return { ok: false, message: "Enter a payment amount." };
+  const today = todayIso();
+  const paidOn = date?.trim() ? date.trim() : today;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(paidOn) || paidOn > today) {
+    return { ok: false, message: "Enter the payment date (today or earlier)." };
+  }
 
   const paid = Math.round(amount);
-  const newBalance = Math.max(0, loan.balance - paid);
+  // interest accrues on the balance; the payment can't retire more principal than is open
+  const { interest, principal } = allocatePayment(loan.balance, loan.rateBps, paid);
+  const applied = Math.min(principal, loan.balance);
+  const newBalance = loan.balance - applied;
+  await db.insert(t.loanPayments).values({
+    loanId,
+    date: paidOn,
+    amount: paid,
+    interest,
+    principal: applied,
+    balanceAfter: newBalance,
+    staffId: user.id,
+    note: note?.trim() ?? "",
+  });
   if (newBalance === 0) {
     await db.update(t.loans).set({ balance: 0, status: "paid", nextDue: null }).where(eq(t.loans.id, loanId));
   } else {
     await db.update(t.loans)
-      .set({ balance: newBalance, status: "current", nextDue: addDays(loan.nextDue ?? todayIso(), 30) })
+      .set({ balance: newBalance, status: "current", nextDue: addMonthsIso(loan.nextDue ?? today, 1) })
       .where(eq(t.loans.id, loanId));
   }
 
   await audit(user.id, "loan.payment", "loan", loanId,
-    `${money(paid)} payment — balance ${money(newBalance)}${newBalance === 0 ? " · paid off" : ""}`);
+    `${money(paid)} payment (${money(interest)} interest · ${money(applied)} principal) — balance ${money(newBalance)}${newBalance === 0 ? " · paid off" : ""}`);
   revalidatePath("/tools/loans");
+  revalidatePath(`/tools/loans/${loanId}`);
   return {
     ok: true,
     message: newBalance === 0

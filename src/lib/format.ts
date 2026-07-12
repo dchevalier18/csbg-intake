@@ -24,6 +24,22 @@ export function localDateOf(iso: string): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+/** "YYYY-MM" of the month before the given ISO date — the reporting cycle
+    that just closed (aggregate reports cover completed months). */
+export function prevMonthYm(iso: string): string {
+  const [y, m] = iso.split("-").map(Number);
+  const year = m === 1 ? y - 1 : y;
+  const month = m === 1 ? 12 : m - 1;
+  return `${year}-${String(month).padStart(2, "0")}`;
+}
+
+/** "2026-06" → "June" (or "June 2026" with year). */
+export function monthName(ym: string, withYear = false): string {
+  const [y, m] = ym.split("-").map(Number);
+  const name = new Date(y, m - 1, 1).toLocaleDateString("en-US", { month: "long" });
+  return withYear ? `${name} ${y}` : name;
+}
+
 export function ageFromDob(dob: string, onDate?: string): number {
   const ref = onDate ? new Date(onDate + "T12:00:00") : new Date();
   const b = new Date(dob + "T12:00:00");
