@@ -4,7 +4,7 @@
 reporting for Community Action Agencies.**
 
 CAP Trellis is built around the data requirements of the **CSBG Annual Report 3.0**
-(OMB No. 0970-0492) — Module 4 Section A services, Section B National Performance
+(OMB No. 0970-0492) — Module 3 Section A services, Section B National Performance
 Indicators, and the Section C All Characteristics Report — with a versioned
 **Federal Poverty Guidelines** eligibility engine. It began at Community Action
 Lehigh Valley (CALV) and is configurable for any CAA.
@@ -89,7 +89,7 @@ systemd/Apache deployment under `deploy/examples/`.
 - **Clients** — scoped directory + 360° profile with every CSBG characteristic, service
   history, capture-now gap filling, and follow-up scheduling
 - **Service log** — 3-field quick entry mapped to the full official SRV/SDA taxonomy
-- **Reports** — live Annual Report rollup: Module 4 Section A services, Section B FNPI
+- **Reports** — live Annual Report rollup: Module 3 Section A services, Section B FNPI
   targets-vs-actuals, Section C All Characteristics; CSV export
 - **Program tools** — attendance, weatherization pipeline, pantry network, seminars,
   construction projects, volunteers, loan servicing
