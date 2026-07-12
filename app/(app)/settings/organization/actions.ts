@@ -14,6 +14,7 @@ export interface ActionResult {
 
 const FY_STARTS = ["October", "July", "January", "April"];
 const CEILINGS = [100, 125, 150, 175, 200];
+const LOOKBACKS = [30, 60, 90, 365]; // common state income-documentation windows
 const LOGO_MODES = ["calv", "wordmark", "upload"];
 // ≈ 500 KB image encoded as a base64 data URL
 const MAX_LOGO_CHARS = 800_000;
@@ -25,6 +26,7 @@ export interface OrgProfileInput {
   region: string;
   fyStart: string;
   csbgCeiling: number;
+  incomeLookbackDays: number;
 }
 
 export async function updateOrgProfile(input: OrgProfileInput): Promise<ActionResult> {
@@ -33,6 +35,7 @@ export async function updateOrgProfile(input: OrgProfileInput): Promise<ActionRe
   if (!name) return { ok: false, message: "Organization name is required." };
   const fyStart = FY_STARTS.includes(input.fyStart) ? input.fyStart : "October";
   const csbgCeiling = CEILINGS.includes(Number(input.csbgCeiling)) ? Number(input.csbgCeiling) : 125;
+  const incomeLookbackDays = LOOKBACKS.includes(Number(input.incomeLookbackDays)) ? Number(input.incomeLookbackDays) : 90;
   await db.update(t.organization)
     .set({
       name,
@@ -41,10 +44,11 @@ export async function updateOrgProfile(input: OrgProfileInput): Promise<ActionRe
       region: (input.region ?? "").trim(),
       fyStart,
       csbgCeiling,
+      incomeLookbackDays,
     })
     .where(eq(t.organization.id, 1))
     ;
-  await audit(user.id, "org.update", "organization", "1", `Agency profile saved (${name}, FY starts ${fyStart}, ceiling ${csbgCeiling}% FPL)`);
+  await audit(user.id, "org.update", "organization", "1", `Agency profile saved (${name}, FY starts ${fyStart}, ceiling ${csbgCeiling}% FPL, ${incomeLookbackDays}-day income lookback)`);
   revalidatePath("/", "layout");
   return { ok: true, message: "Agency profile saved." };
 }

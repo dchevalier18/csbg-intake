@@ -17,6 +17,7 @@ export default async function OrganizationSettingsPage() {
         logoData: org.logoData,
         fyStart: org.fyStart,
         csbgCeiling: org.csbgCeiling,
+        incomeLookbackDays: org.incomeLookbackDays,
       }}
     />
   );

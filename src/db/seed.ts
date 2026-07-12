@@ -36,11 +36,14 @@ export async function runSeed(db: DB): Promise<void> {
     csbgCeiling: 125,
   });
 
-  // ---------- FPL guideline history (versioned; 2025 active) ----------
+  // ---------- FPL guideline history (versioned; 2026 active) ----------
+  // Official HHS tables, 48 contiguous states + D.C. (src/lib/fpl-data.ts).
+  // Earlier years stay for pinned cases — most demo records pin to 2025.
   await db.insert(t.fplSchedules).values([
-    { year: 2023, base: 14580, perAdditional: 5140, effective: "2023-01-19", status: "archived" },
-    { year: 2024, base: 15060, perAdditional: 5380, effective: "2024-01-17", status: "archived" },
-    { year: 2025, base: 15650, perAdditional: 5500, effective: "2025-01-15", status: "active" },
+    { year: 2023, base: 14580, perAdditional: 5140, effective: "2023-01-19", status: "archived", jurisdiction: "contiguous48" },
+    { year: 2024, base: 15060, perAdditional: 5380, effective: "2024-01-17", status: "archived", jurisdiction: "contiguous48" },
+    { year: 2025, base: 15650, perAdditional: 5500, effective: "2025-01-15", status: "archived", jurisdiction: "contiguous48" },
+    { year: 2026, base: 15960, perAdditional: 5680, effective: "2026-01-13", status: "active", jurisdiction: "contiguous48" },
   ]);
 
   // ---------- Programs (CALV's nine) ----------
@@ -133,9 +136,13 @@ export async function runSeed(db: DB): Promise<void> {
     { id: "insurance",  label: "Health insurance", code: "C5", type: "list",  listKey: "insurance", enabled: 1, builtin: 1, sort: 4 },
     { id: "military",   label: "Military status",  code: "C7", type: "list",  listKey: "military",  enabled: 1, builtin: 1, sort: 5 },
     { id: "disability", label: "Disability",       code: "C5", type: "yesno", listKey: null,        enabled: 1, builtin: 1, sort: 6 },
+    // C4 is a collected characteristic (not derivable from work/education) —
+    // stored in the record's custom fields; the Section C rollup reads it there.
+    { id: "disconnectedYouth", label: "Disconnected youth (14-24, not working or in school)",
+      code: "C4", type: "yesno", listKey: null, enabled: 1, builtin: 0, sort: 7 },
   ]);
 
-  // ---------- Service taxonomy (full CSBG 3.0 Module 3 Section A) ----------
+  // ---------- Service taxonomy (full CSBG 3.0 Module 4 Section A) ----------
   await db.insert(t.services).values(SERVICES.map((s, i) => ({
     code: s.code, domain: s.domain, label: s.label, active: 1, sort: i,
   })));
@@ -326,7 +333,7 @@ export async function runSeed(db: DB): Promise<void> {
     actual: 0,
   })));
 
-  // ---------- Outcome log (client-level FNPI recording — feeds Module 3 Section B) ----------
+  // ---------- Outcome log (client-level FNPI recording — feeds Module 4 Section B) ----------
   await db.insert(t.outcomeLog).values([
     { date: "2026-03-18", clientId: "C-2417", code: "FNPI 1b", programId: "cad-a", staffId: "dr", status: "working",  note: "Job-readiness workshop complete; search ongoing." },
     { date: "2026-05-02", clientId: "C-2417", code: "FNPI 5j", programId: "shfb",  staffId: "dr", status: "achieved", note: "Monthly distribution + SNAP enrollment confirmed." },

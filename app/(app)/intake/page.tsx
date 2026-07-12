@@ -34,6 +34,7 @@ export default async function IntakePage({ searchParams }: {
       docTypes={await getDocTypes()}
       fpl={{ year: fpl.year, base: fpl.base, perAdditional: fpl.perAdditional }}
       ceiling={org.csbgCeiling}
+      lookbackDays={org.incomeLookbackDays}
       user={{ id: user.id, name: user.name }}
       prefill={{ first: sp.first ?? "", last: sp.last ?? "", seminarAttendeeId: sp.seminarAttendeeId ?? "" }}
     />
