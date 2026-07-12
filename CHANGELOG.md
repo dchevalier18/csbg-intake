@@ -6,6 +6,15 @@ tracks a federal instrument or guideline revision) are marked **[compliance]**
 
 ## Unreleased — 0.5.0 (roadmap Phases 1–5)
 
+### Windows local install (deferred item — §7 local tier, first cut)
+- deploy/windows: dependency-free PowerShell installer (Node check, build,
+  embedded database, /setup wizard, start-at-sign-in task) + a console
+  server manager with the §7.2 contract — status, start/stop/restart,
+  change port, office-LAN toggle with managed firewall rule, open app,
+  recent logs. Data (embedded DB + uploads + log) lives in one backupable
+  folder. Standalone build output is now Docker-only so `next start` works
+  on this tier.
+
 ### Spanish (staff app) — foundation + first screens (deferred item)
 - Per-user UI language (English / Español) with a toggle in the user menu;
   LangProvider lifts the portal's colocated EN/ES dictionary pattern app-wide
