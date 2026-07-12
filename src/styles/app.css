@@ -184,3 +184,19 @@ a.tlink:hover,button.tlink:hover{color:var(--calv-red)}
 .notice.sand{background:var(--calv-sand-15);border:1px solid var(--calv-sand-35)}
 .notice.good{background:var(--calv-sage-15);border:1px solid var(--calv-sage-35)}
 .notice.bad{background:var(--calv-red-15);border:1px solid var(--calv-red-35)}
+
+/* ---------- accessibility ---------- */
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 200;
+  background: var(--calv-slate, #333);
+  color: #fff;
+  padding: 10px 16px;
+  border-radius: 0 0 4px 0;
+  font-size: 13px;
+}
+.skip-link:focus {
+  left: 0;
+}

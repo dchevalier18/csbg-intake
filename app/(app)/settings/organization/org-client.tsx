@@ -17,6 +17,7 @@ export interface OrgProps {
   fyStart: string;
   csbgCeiling: number;
   incomeLookbackDays: number;
+  contactLine: string;
 }
 
 const LABEL_KICK: React.CSSProperties = {
@@ -32,11 +33,13 @@ export function OrgSettingsClient({ org }: { org: OrgProps }) {
     name: org.name, short: org.short, tagline: org.tagline,
     region: org.region, fyStart: org.fyStart, csbgCeiling: org.csbgCeiling,
     incomeLookbackDays: org.incomeLookbackDays,
+    contactLine: org.contactLine,
   });
   const savedRef = useRef(JSON.stringify({
     name: org.name, short: org.short, tagline: org.tagline,
     region: org.region, fyStart: org.fyStart, csbgCeiling: org.csbgCeiling,
     incomeLookbackDays: org.incomeLookbackDays,
+    contactLine: org.contactLine,
   }));
   const [accent, setAccent] = useState(org.accent);
   const [logoMode, setLogoMode] = useState(org.logoMode);
@@ -119,6 +122,9 @@ export function OrgSettingsClient({ org }: { org: OrgProps }) {
               <select value={form.csbgCeiling} onChange={(e) => setAndSave("csbgCeiling", Number(e.target.value))}>
                 {[100, 125, 150, 175, 200].map((p) => <option key={p} value={p}>{p}% FPL</option>)}
               </select>
+            </Field>
+            <Field label="Client portal contact line" hint="Phone + hours shown to applicants on the portal" span={2}>
+              <input value={form.contactLine} onChange={(e) => setField("contactLine", e.target.value)} onBlur={() => void saveProfile()} placeholder="(555) 555-1234 · Mon–Fri 8:30–4:30" />
             </Field>
             <Field label="Income lookback" hint="State documentation policy — the window intake income annualizes from">
               <select value={form.incomeLookbackDays} onChange={(e) => setAndSave("incomeLookbackDays", Number(e.target.value))}>

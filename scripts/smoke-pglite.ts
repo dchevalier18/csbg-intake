@@ -8,6 +8,9 @@ import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import * as schema from "../src/db/schema";
 import { BOOTSTRAP } from "../src/db/ddl";
 import { runSeed } from "../src/db/seed";
+import { runInit } from "../src/db/init";
+import { characteristicByCode } from "../src/lib/csbg-catalog";
+import { LATEST_OFFICIAL_FPL_YEAR } from "../src/lib/fpl-data";
 
 const t = schema;
 let failures = 0;
@@ -100,6 +103,34 @@ async function main(): Promise<void> {
   check("delete builder works", (await db.select().from(t.kv).where(eq(t.kv.key, "smoke"))).length === 0);
 
   await pglite.close();
+
+  // ---------- Production init path (CSBG_DEMO_SEED=0 → /setup wizard) ----------
+  const pglite2 = new PGlite();
+  await pglite2.exec(BOOTSTRAP);
+  const db2 = drizzle(pglite2, { schema }) as unknown as NodePgDatabase<typeof schema>;
+  await runInit(db2);
+
+  const org2 = (await db2.select().from(t.organization).where(eq(t.organization.id, 1)))[0];
+  check("init: placeholder organization", org2?.name === "New Community Action Agency" && org2.logoMode === "wordmark");
+  check("init: no users (setup wizard owns first admin)", (await db2.select().from(t.users)).length === 0);
+
+  const scheds = await db2.select().from(t.fplSchedules);
+  const active2 = scheds.find((s) => s.status === "active");
+  check("init: latest official FPL year active", active2?.year === LATEST_OFFICIAL_FPL_YEAR,
+    `active ${active2?.year}`);
+  check("init: multiple guideline years on record", scheds.length >= 3, `got ${scheds.length}`);
+
+  const raceValues = (await db2.select().from(t.listValues)).filter((v) => v.listKey === "race").map((v) => v.value);
+  const c6 = characteristicByCode("C6")!.options;
+  check("init: race list uses instrument-canonical strings", c6.every((o) => raceValues.includes(o)),
+    raceValues.join(" | ").slice(0, 80));
+
+  check("init: services taxonomy loaded", (await db2.select().from(t.services)).length > 70);
+  check("init: intake fields incl. C4", (await db2.select().from(t.intakeFields)).some((f) => f.code === "C4"));
+  check("init: no demo clients", (await db2.select().from(t.clients)).length === 0);
+
+  await pglite2.close();
+
   console.log(failures === 0 ? "\nSmoke test passed." : `\n${failures} check(s) FAILED.`);
   process.exit(failures === 0 ? 0 : 1);
 }

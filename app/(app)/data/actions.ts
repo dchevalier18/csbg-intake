@@ -8,8 +8,10 @@ import { readSheet } from "@/lib/spreadsheet";
 import { db, t } from "@/db";
 import { requireAdmin } from "@/lib/auth";
 import { audit, getPrograms } from "@/lib/access";
-import { kvGet, kvSet } from "@/lib/data/core";
+import { kvGet, kvSet, nextClientId } from "@/lib/data/core";
 import { importTemplate } from "@/lib/import-templates";
+import { getActiveFpl } from "@/lib/fpl";
+import { canonicalCharacteristic } from "@/lib/csbg-catalog";
 import { fmt, shortDate, todayIso } from "@/lib/format";
 
 const MAX_FILE_BYTES = 4 * 1024 * 1024; // keep in step with serverActions.bodySizeLimit
@@ -128,7 +130,72 @@ export async function commitImport(
   const errors: string[] = [];
   const skip = (rowNo: number, why: string) => errors.push(`Row ${rowNo}: ${why}`);
 
-  if (tpl.id === "pantry") {
+  if (tpl.id === "clients") {
+    // ---- client migration (legacy-system cutover) ----
+    const programs = await getPrograms();
+    const programByRef = new Map<string, string>();
+    for (const p of programs) {
+      programByRef.set(p.id.toLowerCase(), p.id);
+      programByRef.set(p.short.toLowerCase(), p.id);
+      programByRef.set(p.name.toLowerCase(), p.id);
+    }
+    const existing = await db.select({ first: t.clients.first, last: t.clients.last, dob: t.clients.dob }).from(t.clients);
+    const seen = new Set(existing.map((c) => `${c.first.toLowerCase()}|${c.last.toLowerCase()}|${c.dob}`));
+    const active = await getActiveFpl(); // migrated records pin to the schedule in force at import
+    const now = new Date().toISOString();
+    const today = todayIso();
+    // characteristics canonicalize where possible; unmappable values import
+    // as-is and surface on the Reports data-quality panel for cleanup
+    const canonOr = (code: string, v: string): string | null =>
+      v === "" ? null : canonicalCharacteristic(code, v) ?? v;
+
+    for (const [i, row] of rows.entries()) {
+      const rowNo = i + 2;
+      const first = cell(row, "first");
+      const last = cell(row, "last");
+      if (!first || !last) { skip(rowNo, "missing first or last name"); continue; }
+      const dob = parseDateIso(cell(row, "dob"));
+      if (!dob) { skip(rowNo, `date of birth “${cell(row, "dob")}” — use a format like 2001-05-14`); continue; }
+      const key = `${first.toLowerCase()}|${last.toLowerCase()}|${dob}`;
+      if (seen.has(key)) { skip(rowNo, `${first} ${last} (${dob}) already has a client record`); continue; }
+      const programRef = cell(row, "program");
+      const programId = programByRef.get(programRef.toLowerCase());
+      if (!programId) { skip(rowNo, programRef ? `no program matches “${programRef}”` : "missing program"); continue; }
+      const income = num(cell(row, "income"));
+      const hhSizeRaw = num(cell(row, "hhSize"));
+      const hhSize = hhSizeRaw !== null ? Math.min(12, Math.max(1, Math.round(hhSizeRaw))) : 1;
+      const enrolledRaw = cell(row, "enrolled");
+      const enrolled = enrolledRaw ? parseDateIso(enrolledRaw) : today;
+      if (!enrolled) { skip(rowNo, `enrollment date “${enrolledRaw}” — use a format like 2025-10-12`); continue; }
+
+      const clientId = await nextClientId();
+      await db.insert(t.clients).values({
+        id: clientId,
+        first,
+        last,
+        dob,
+        phone: cell(row, "phone") || null,
+        address: cell(row, "address") || null,
+        sex: canonOr("C1", cell(row, "sex")),
+        race: canonOr("C6", cell(row, "race")),
+        housing: canonOr("D11", cell(row, "housing")),
+        hhType: canonOr("D9", cell(row, "hhType")),
+        hhSize,
+        income: income !== null && income > 0 ? Math.round(income) : 0,
+        caseworkerId: user.id,
+        enrolled,
+        fplYear: active.year,
+        nextFollowUp: null,
+        flags: ["Migrated record — verify characteristics"],
+        custom: {},
+        status: "active",
+        createdAt: now,
+      });
+      await db.insert(t.clientPrograms).values({ clientId, programId });
+      seen.add(key);
+      imported++;
+    }
+  } else if (tpl.id === "pantry") {
     const agencies = await db.select().from(t.pantryAgencies);
     const byRef = new Map<string, (typeof agencies)[number]>();
     for (const a of agencies) {

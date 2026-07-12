@@ -60,6 +60,9 @@ export function DatabaseSettingsClient({ stats, backups }: {
             <button className="calv-btn calv-btn--ghost calv-btn--sm" disabled={pending} onClick={health}>
               <I name="shield" size={13} /> Run health check
             </button>
+            <a className="calv-btn calv-btn--ghost calv-btn--sm" href="/settings/database/export" download>
+              <I name="doc" size={13} /> Export all data (JSON)
+            </a>
             <button className="calv-btn calv-btn--primary calv-btn--sm" disabled={pending} onClick={backup}>
               <I name="layers" size={13} /> Back up now
             </button>

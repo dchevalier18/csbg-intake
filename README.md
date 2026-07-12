@@ -39,8 +39,12 @@ setup** (embedded PGlite, data stored under `data/`):
 DATABASE_URL=pglite://./data/pglite npm run dev
 ```
 
-The database schema bootstraps automatically, and an empty database seeds itself
-with realistic fictional demo data.
+The database schema bootstraps automatically. By default an empty database seeds
+itself with realistic fictional demo data (evaluation mode). Set
+`CSBG_DEMO_SEED=0` for a production install — the database initializes with only
+the canonical CSBG taxonomy and official FPL schedules, and the first visit runs
+the **/setup wizard** (agency profile, guideline table, eligibility policy, first
+administrator). The Docker compose file ships with `CSBG_DEMO_SEED=0`.
 
 **Demo accounts** (password `demo1234`):
 

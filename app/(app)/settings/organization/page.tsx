@@ -18,6 +18,7 @@ export default async function OrganizationSettingsPage() {
         fyStart: org.fyStart,
         csbgCeiling: org.csbgCeiling,
         incomeLookbackDays: org.incomeLookbackDays,
+        contactLine: org.contactLine,
       }}
     />
   );
