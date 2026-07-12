@@ -1,7 +1,7 @@
 import { pgTable, text, integer, jsonb, primaryKey } from "drizzle-orm/pg-core";
 
 /* ============================================================
-   CSBG Client Intake System — database schema (PostgreSQL / Drizzle)
+   CAP Trellis — database schema (PostgreSQL / Drizzle)
    Dates are ISO strings ("YYYY-MM-DD"); timestamps are ISO datetime.
    ============================================================ */
 

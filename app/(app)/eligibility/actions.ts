@@ -8,7 +8,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { db, t } from "@/db";
 import type { Application, User } from "@/db/schema";
-import { requireUser } from "@/lib/auth";
+import { requireUser, isAdmin } from "@/lib/auth";
 import { getProgram, userCanSeeProgram, audit } from "@/lib/access";
 import { getEnabledIntakeFields, requiredDocKeys, applicationDocsVerified, programCeiling, OPEN_STAGES, nextClientId } from "@/lib/data/core";
 import { fplStatusFor, fplSchedule, getActiveFpl, type FplStatus } from "@/lib/fpl";
@@ -183,6 +183,11 @@ export async function verifyApplicationDoc(appId: string, docKey: string): Promi
     (application_docs row + audit log) and is visible to program monitors. */
 export async function bypassVerifyApplicationDoc(appId: string, docKey: string, reason: string): Promise<ActionResult> {
   const user = await requireUser();
+  // Signing away a documentation requirement is a supervisory act — tiered to
+  // Program Manager / Data Admin (design-handoff hardening item).
+  if (!isAdmin(user)) {
+    return { ok: false, message: "Verifying without a document requires a Program Manager or Data Admin — ask a supervisor to sign the bypass." };
+  }
   const g = await guardDocAction(user, appId, docKey);
   if (!g.ok) return { ok: false, message: g.message };
 
@@ -223,6 +228,11 @@ export async function undoApplicationDocVerification(appId: string, docKey: stri
 
   const row = await loadDocRow(appId, docKey);
   if (row?.status !== "verified") return { ok: false, message: "That document isn't verified." };
+  // Undoing someone ELSE'S sign-off is supervisory; your own recent sign-off isn't.
+  const signedBy = row.bypassBy ?? row.verifiedBy;
+  if (signedBy && signedBy !== user.id && !isAdmin(user)) {
+    return { ok: false, message: "Only a Program Manager or Data Admin can undo another staff member's verification." };
+  }
 
   const hadBypass = !!row.bypassBy;
   await upsertDocRow(appId, docKey, {

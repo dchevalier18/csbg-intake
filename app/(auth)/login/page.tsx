@@ -4,11 +4,15 @@ import { getCurrentUser } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { LoginForm } from "./login-form";
 
-export const metadata = { title: "Sign in · CSBG Client Intake System" };
+export const metadata = { title: "Sign in · CAP Trellis" };
 
 export default async function LoginPage() {
   const me = await getCurrentUser();
   if (me) redirect("/dashboard");
+
+  // fresh production install (no users yet) → first-run setup wizard
+  const anyUser = (await db.select({ id: t.users.id }).from(t.users)).length > 0;
+  if (!anyUser) redirect("/setup");
 
   const org = (await db.select().from(t.organization).where(eq(t.organization.id, 1)))[0];
   const demoUsers = await db
@@ -20,9 +24,16 @@ export default async function LoginPage() {
   return (
     <div className="login-wrap" style={{ "--brand": org?.accent ?? "#D14124" } as React.CSSProperties}>
       <div className="login-brand">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/brand/logo-white.svg" alt={org?.name ?? "Community Action"} />
-        <h1>CSBG Client<br />Intake System</h1>
+        {org?.logoMode === "upload" && org.logoData ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={org.logoData} alt={org.name} />
+        ) : org?.logoMode === "calv" ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src="/brand/logo-white.svg" alt={org.name} />
+        ) : (
+          <div style={{ fontFamily: "var(--font-h1)", fontSize: 30, color: "#fff", letterSpacing: ".02em" }}>{org?.short || org?.name || "CAP Trellis"}</div>
+        )}
+        <h1>CAP Trellis</h1>
         <p>
           One pass captures everything the CSBG Annual Report 3.0 needs — intake, eligibility,
           service delivery, and outcomes for {org?.name ?? "your Community Action Agency"}.
