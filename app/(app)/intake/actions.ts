@@ -103,7 +103,7 @@ export async function submitIntake(payload: IntakePayload): Promise<{ ok: true; 
   }
 
   const id = await nextApplicationId();
-  const portalToken = crypto.randomBytes(8).toString("hex"); // 16 hex chars
+  const portalToken = crypto.randomBytes(32).toString("hex"); // 256-bit capability URL
   // programs with no document requirements skip straight to review —
   // there is nothing to collect, so the docs stage would be a dead end
   const reqDocs = await requiredDocKeys(payload.programId);

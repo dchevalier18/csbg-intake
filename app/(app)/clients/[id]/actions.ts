@@ -179,7 +179,7 @@ export async function enrollInProgram(clientId: string, programId: string): Prom
       `Approval adds the program to the existing record — no duplicate client is created. ` +
       (st.eligible ? "Income-eligible at intake." : `⚠ Income above the ${ceiling}% FPL ceiling — flag for review.`),
     clientId: c.id, // the link — approval enrolls THIS record instead of creating one
-    portalToken: crypto.randomBytes(8).toString("hex"),
+    portalToken: crypto.randomBytes(32).toString("hex"),
   });
 
   const now = new Date().toISOString();

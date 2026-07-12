@@ -1,46 +1,50 @@
-# Staging deployment — YOUR_SERVER_IP (`your-server`, shared Ubuntu box)
+# Deploying CAP Trellis
 
-The app runs as a systemd service (`csbg-intake`, Next.js on `127.0.0.1:3100`,
-**running as the `dchevalier` user**) behind an Apache reverse-proxy vhost on
-port 80. PostgreSQL (already on the box) hosts a dedicated `csbg_intake`
-database, **localhost-only** — the app connects over `localhost`.
+Three supported paths, by agency capacity. All of them serve the same app; pick
+the one that matches who will run it. (Design rationale: `docs/ROADMAP.md` §7.)
 
-This box also hosts other apps (`app-example-a`, `app-example-b`). Everything
-here is **additive and non-destructive**: a new vhost (other sites and
-`000-default` untouched), a new database + role (the shared Postgres instance is
-not reconfigured or restarted), a new systemd unit, and a narrow sudoers rule.
+## 1. Docker Compose (recommended self-host)
 
-## First-time setup
-1. From the workstation, stage the provisioning scripts to the server (no sudo):
-   ```powershell
-   ssh dev "mkdir -p ~/csbg-deploy"
-   scp deploy/provision.sh deploy/apache-csbg-intake.conf deploy/csbg-intake.service dev:csbg-deploy/
-   ```
-2. On the server, run provisioning once (the only step needing a password):
-   ```
-   ssh -t dev "sudo bash ~/csbg-deploy/provision.sh"
-   ```
-   Creates the `csbg` role + `csbg_intake` DB (password generated once into
-   `/etc/csbg-intake.env`), the Apache vhost, the systemd unit, `/opt/csbg-intake`
-   owned by `dchevalier`, and a NOPASSWD rule for `systemctl … csbg-intake` only.
-3. From the workstation: `.\deploy\deploy.ps1` — packs, ships, builds, and starts
-   the service (no password). Browse to `http://YOUR_SERVER_IP/`. First boot
-   bootstraps the schema and seeds demo data (logins dana/marcus/luz/robin/joan/
-   terrence · `demo1234`).
+One VPS or agency VM, one command:
 
-## Day-to-day
-- **Deploy a change:** `.\deploy\deploy.ps1`
-- **Reseed demo data:** `ssh dev "cd /opt/csbg-intake && set -a && . /etc/csbg-intake.env && set +a && npm run seed"`
-- **Logs:** `ssh dev "journalctl -u csbg-intake -f"` · Apache: `/var/log/apache2/csbg-intake-*.log`
-- **Backups:** Settings → Database → "Back up now" runs `pg_dump` into `/opt/csbg-intake/data/backups`.
+```bash
+cp .env.example .env    # set CSBG_DOMAIN and DB_PASSWORD
+docker compose up -d
+```
 
-## Developing against this database from your workstation
-The staging Postgres is localhost-only, so a dev workstation can't reach it yet.
-To enable it deliberately: open `listen_addresses` + a scoped `pg_hba` rule for
-the YOUR_LAN_CIDR LAN and restart Postgres (**this briefly bounces the shared
-instance's other databases**). Ask and it's a one-time change; then point
-`.env.local` `DATABASE_URL` at `postgres://csbg:…@YOUR_SERVER_IP:5432/csbg_intake`.
+What you get:
 
-Notes: the vhost answers `csbg-intake.caclv.org` and the raw IP. `CSBG_ALLOW_HTTP=1`
-keeps the session cookie non-Secure because staging is plain HTTP — drop it when
-TLS is added.
+- **app** — the Next.js server (standalone build, non-root user)
+- **db** — PostgreSQL 16 with a named volume
+- **caddy** — reverse proxy with **automatic HTTPS** (Let's Encrypt) for
+  `CSBG_DOMAIN`; `localhost` serves plain HTTP for trials
+- **backup** — nightly `pg_dump` into `deploy/docker/backups/`, keeping the
+  most recent 30
+
+Updating: `git pull && docker compose build && docker compose up -d`.
+Restoring: `pg_restore -h localhost -U csbg -d csbg_intake --clean <dump>`
+(run inside the db container: `docker compose exec db …`).
+
+DNS: point an A record for `CSBG_DOMAIN` at the server before first start so
+certificate issuance succeeds. Only ports 80/443 need to be reachable.
+
+## 2. Embedded database (local / offline)
+
+No PostgreSQL at all — the app runs its own embedded engine (PGlite) in-process:
+
+```bash
+DATABASE_URL=pglite://./data/pglite npm run build && npm start
+```
+
+Suited to a single office machine or an offline trial. The `data/` directory
+holds both the database and uploaded documents — back that folder up. Not for
+multi-process deployments (one Node server only).
+
+## 3. systemd + PostgreSQL + reverse proxy (IT-managed)
+
+A worked example — the original Community Action Lehigh Valley staging setup
+(Apache vhost, systemd unit, provisioning script) — lives in
+`deploy/examples/calv-staging/`. Adapt the hostnames, users, and paths; the
+only contract the app needs is `DATABASE_URL` in the environment and a proxy
+passing HTTP to port 3100. Put TLS in front of it; `CSBG_ALLOW_HTTP=1` exists
+for isolated LAN staging only.
