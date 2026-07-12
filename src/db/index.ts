@@ -1,24 +1,41 @@
 import { Pool, Client } from "pg";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
+import { PGlite } from "@electric-sql/pglite";
+import { drizzle as drizzlePglite } from "drizzle-orm/pglite";
 import * as schema from "./schema";
 import { runSeed } from "./seed";
 import { BOOTSTRAP } from "./ddl";
 
 /* ============================================================
-   PostgreSQL connection — dedicated database, DATABASE_URL.
-   The exported `db` is usable synchronously everywhere: a proxy
-   gates every query/connection behind a one-time bootstrap
-   (DDL + auto-seed) so callers never have to await an init step.
+   Database connection — DATABASE_URL selects the driver:
+
+     postgres://…        PostgreSQL via node-postgres (server installs)
+     pglite://<dir>      embedded Postgres (PGlite) storing data under
+                         <dir> — zero-setup local/offline mode
+     pglite://memory     embedded, in-memory (tests/preview)
+
+   Either way the exported `db` is usable synchronously everywhere:
+   a proxy gates every query behind a one-time bootstrap (DDL +
+   auto-seed of an empty database) so callers never await an init.
    ============================================================ */
 
 const DATABASE_URL =
   process.env.DATABASE_URL || "postgres://csbg:csbg@localhost:5432/csbg_intake";
 
+const EMBEDDED = DATABASE_URL.startsWith("pglite://");
+
 /** Full connection string (server-side only — used by the seed CLI). */
 export const databaseUrl = DATABASE_URL;
 
+/** True when running on the embedded (PGlite) driver. */
+export const isEmbeddedDb = EMBEDDED;
+
 /** Connection target (no credentials) for Settings → Database & storage. */
 export function databaseInfo(): { host: string; port: string; database: string; user: string } {
+  if (EMBEDDED) {
+    const dir = DATABASE_URL.slice("pglite://".length) || "./data/pglite";
+    return { host: "embedded (PGlite)", port: "—", database: dir, user: "—" };
+  }
   const u = new URL(DATABASE_URL);
   return {
     host: u.hostname,
@@ -30,12 +47,22 @@ export function databaseInfo(): { host: string; port: string; database: string; 
 
 type DB = NodePgDatabase<typeof schema>;
 
+interface Conn {
+  db: DB;
+  ensureBoot: () => Promise<void>;
+  /** Forget the completed bootstrap so the next query re-runs DDL + seed
+      (seed CLI only — used right after dropping every table). */
+  resetBoot: () => void;
+}
+
+/* ---------- PostgreSQL (node-postgres) ---------- */
+
 /* One-time bootstrap on a dedicated connection: DDL + auto-seed of an empty
    database, serialized across processes (next build workers, dev + seed CLI)
    with an advisory lock. Queries through the exported `db` wait on this. */
 const BOOT_LOCK = 727274001;
 
-async function bootstrap(): Promise<void> {
+async function bootstrapPg(): Promise<void> {
   const client = new Client({ connectionString: DATABASE_URL });
   await client.connect();
   try {
@@ -53,16 +80,10 @@ async function bootstrap(): Promise<void> {
   }
 }
 
-interface Conn {
-  pool: Pool;
-  db: DB;
-  booted?: Promise<void>;
-}
-
-function createConn(): Conn {
+function createPgConn(): Conn {
   const pool = new Pool({ connectionString: DATABASE_URL, max: 10 });
-  const conn: Conn = { pool, db: undefined as unknown as DB };
-  const ensureBoot = () => (conn.booted ??= bootstrap());
+  const conn = { booted: undefined as Promise<void> | undefined };
+  const ensureBoot = () => (conn.booted ??= bootstrapPg());
   // Gate the two entry points drizzle uses (pool.query for one-shot statements,
   // pool.connect for transactions) behind the bootstrap promise. The proxy keeps
   // the Pool prototype, so drizzle's `instanceof Pool` transaction path still works.
@@ -76,8 +97,45 @@ function createConn(): Conn {
       return typeof v === "function" ? (v as (...a: unknown[]) => unknown).bind(target) : v;
     },
   });
-  conn.db = drizzle(gatedPool, { schema });
-  return conn;
+  return {
+    db: drizzle(gatedPool, { schema }),
+    ensureBoot,
+    resetBoot: () => { conn.booted = undefined; },
+  };
+}
+
+/* ---------- Embedded (PGlite) ---------- */
+
+function createPgliteConn(): Conn {
+  const dir = DATABASE_URL.slice("pglite://".length);
+  // single in-process engine — no advisory lock needed (or available across processes);
+  // embedded mode is for one local server, never for multi-process deployments
+  const client = dir && dir !== "memory" ? new PGlite(dir) : new PGlite();
+  const conn = { booted: undefined as Promise<void> | undefined };
+  const boot = async () => {
+    await client.exec(BOOTSTRAP);
+    const r = await client.query<{ n: number }>("SELECT COUNT(*)::int AS n FROM organization");
+    if (r.rows[0].n === 0) {
+      await runSeed(drizzlePglite(client, { schema }) as unknown as DB);
+    }
+  };
+  const ensureBoot = () => (conn.booted ??= boot());
+  const gated = new Proxy(client, {
+    get(target, prop) {
+      if (prop === "query" || prop === "exec" || prop === "transaction") {
+        return (...args: unknown[]) =>
+          ensureBoot().then(() =>
+            (target[prop as "query" | "exec" | "transaction"] as (...a: unknown[]) => unknown).apply(target, args));
+      }
+      const v = Reflect.get(target, prop, target);
+      return typeof v === "function" ? (v as (...a: unknown[]) => unknown).bind(target) : v;
+    },
+  });
+  return {
+    db: drizzlePglite(gated as PGlite, { schema }) as unknown as DB,
+    ensureBoot,
+    resetBoot: () => { conn.booted = undefined; },
+  };
 }
 
 declare global {
@@ -85,15 +143,21 @@ declare global {
   var __csbgConn: Conn | undefined;
 }
 
-// survive Next.js dev-mode hot reloads with a single pool
-const conn: Conn = globalThis.__csbgConn ?? createConn();
+// survive Next.js dev-mode hot reloads with a single pool/engine
+const conn: Conn = globalThis.__csbgConn ?? (EMBEDDED ? createPgliteConn() : createPgConn());
 if (process.env.NODE_ENV !== "production") globalThis.__csbgConn = conn;
 
 export const db: DB = conn.db;
 
 /** Force bootstrap (used by the seed CLI; app code never needs this). */
 export function dbReady(): Promise<void> {
-  return (conn.booted ??= bootstrap());
+  return conn.ensureBoot();
+}
+
+/** Drop-everything reset hook for the seed CLI: forget the completed bootstrap
+    so the next dbReady() re-runs DDL + auto-seed. App code never calls this. */
+export function dbResetBootstrap(): void {
+  conn.resetBoot();
 }
 
 export * as t from "./schema";

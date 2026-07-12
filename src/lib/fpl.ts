@@ -31,14 +31,29 @@ export async function fplSchedule(year?: number | null): Promise<FplSchedule> {
   return getActiveFpl();
 }
 
-export async function fplAnnualFor(size: number, year?: number | null): Promise<number> {
-  const s = await fplSchedule(year);
+/* ---------- pure schedule math (unit-tested; no DB) ---------- */
+
+export type ScheduleFigures = Pick<FplSchedule, "base" | "perAdditional">;
+
+/** Annual guideline dollars for a household size under one schedule. */
+export function annualForSchedule(s: ScheduleFigures, size: number): number {
   return s.base + s.perAdditional * (Math.max(1, size) - 1);
+}
+
+/** % of FPL (rounded) for an income + household size under one schedule. */
+export function pctForSchedule(s: ScheduleFigures, income: number, size: number): number {
+  return Math.round((income / annualForSchedule(s, size)) * 100);
+}
+
+/* ---------- schedule-resolving wrappers ---------- */
+
+export async function fplAnnualFor(size: number, year?: number | null): Promise<number> {
+  return annualForSchedule(await fplSchedule(year), size);
 }
 
 /** % of FPL for an income/household size, under a pinned (or active) schedule. */
 export async function fplPctFor(income: number, size: number, year?: number | null): Promise<number> {
-  return Math.round((income / (await fplAnnualFor(size, year))) * 100);
+  return pctForSchedule(await fplSchedule(year), income, size);
 }
 
 export interface FplStatus {
@@ -53,7 +68,12 @@ export interface FplStatus {
 /** Eligibility status vs the agency's CSBG ceiling (% of FPL). */
 export async function fplStatusFor(income: number, size: number, year: number | null | undefined, ceiling: number): Promise<FplStatus> {
   const s = await fplSchedule(year);
-  const pct = Math.round((income / (s.base + s.perAdditional * (Math.max(1, size) - 1))) * 100);
+  return statusForSchedule(s, income, size, ceiling);
+}
+
+/** Pure status math for one resolved schedule (unit-tested; no DB). */
+export function statusForSchedule(s: FplSchedule, income: number, size: number, ceiling: number): FplStatus {
+  const pct = pctForSchedule(s, income, size);
   const tone = pct <= ceiling ? "sage" : pct <= 200 ? "amber" : "red";
   return {
     pct,
