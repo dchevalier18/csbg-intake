@@ -506,9 +506,42 @@ export const loans = pgTable("loans", {
   balance: integer("balance").notNull().default(0),
   rate: text("rate").notNull().default(""),
   term: text("term").notNull().default(""),
+  // structured terms behind the display strings — drive the amortization schedule
+  rateBps: integer("rate_bps"),                 // annual rate in basis points (450 = 4.50%)
+  termMonths: integer("term_months"),
+  originated: text("originated"),               // disbursement date (ISO)
   status: text("status").notNull().default("current"), // 'current' | 'late' | 'paid'
   nextDue: text("next_due"),
   srvCode: text("srv_code").notNull().default("SRV 3b"),
+});
+
+// Payment ledger — one row per payment recorded against a loan, with the
+// interest/principal split at the balance the payment was applied to.
+export const loanPayments = pgTable("loan_payments", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  loanId: text("loan_id").notNull(),
+  date: text("date").notNull(),
+  amount: integer("amount").notNull(),
+  interest: integer("interest").notNull().default(0),
+  principal: integer("principal").notNull().default(0),
+  balanceAfter: integer("balance_after").notNull(),
+  staffId: text("staff_id").notNull(),
+  note: text("note").notNull().default(""),
+});
+
+// Weatherization contractor expense vouchers (submitted → approved → paid)
+export const wxVouchers = pgTable("wx_vouchers", {
+  id: text("id").primaryKey(),
+  programId: text("program_id").notNull(),
+  contractorId: text("contractor_id").notNull(),
+  jobId: text("job_id"),
+  date: text("date").notNull(),
+  amount: integer("amount").notNull(),
+  memo: text("memo").notNull().default(""),
+  status: text("status").notNull().default("submitted"), // 'submitted' | 'approved' | 'paid'
+  createdBy: text("created_by").notNull(),
+  decidedBy: text("decided_by"),
+  paidAt: text("paid_at"),
 });
 
 // Type exports for convenience
