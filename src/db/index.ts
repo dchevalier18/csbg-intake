@@ -131,7 +131,20 @@ function createPgliteConn(): Conn {
   // PGlite's own mkdir is NOT recursive — a nested data dir (./data/pglite)
   // fails with ENOENT unless the parents exist. Create the full path first.
   if (dir && dir !== "memory") {
-    fs.mkdirSync(path.resolve(dir), { recursive: true });
+    const abs = path.resolve(dir);
+    fs.mkdirSync(abs, { recursive: true });
+    // A data dir a crashed instance left PARTIALLY initialized (e.g. killed
+    // mid-initdb) aborts every later open. A healthy PGlite dir always has a
+    // PG_VERSION file — quarantine anything non-empty without one (moved
+    // aside, never deleted) so the engine can initialize fresh.
+    const entries = fs.readdirSync(abs);
+    const healthy = entries.includes("PG_VERSION") && entries.includes("postgresql.conf");
+    if (entries.length > 0 && !healthy) {
+      const quarantine = `${abs}.corrupt-${new Date().toISOString().replace(/[:.]/g, "-")}`;
+      fs.renameSync(abs, quarantine);
+      fs.mkdirSync(abs, { recursive: true });
+      console.warn(`[db] embedded data dir was partially initialized — moved to ${quarantine} and starting fresh`);
+    }
   }
   // single in-process engine — no advisory lock needed (or available across processes);
   // embedded mode is for one local server, never for multi-process deployments
