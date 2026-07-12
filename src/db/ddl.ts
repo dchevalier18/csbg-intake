@@ -237,4 +237,12 @@ ALTER TABLE application_docs ADD COLUMN IF NOT EXISTS bypass_reason TEXT;
 ALTER TABLE programs ADD COLUMN IF NOT EXISTS fpl_ceiling INTEGER;
 ALTER TABLE service_log ADD COLUMN IF NOT EXISTS file_name TEXT;
 ALTER TABLE service_log ADD COLUMN IF NOT EXISTS file_path TEXT;
+-- Phase 2 (AR 3.0 compliance core): jurisdictioned FPL, income worksheet,
+-- frozen determinations, state income-lookback policy.
+ALTER TABLE organization ADD COLUMN IF NOT EXISTS jurisdiction TEXT NOT NULL DEFAULT 'contiguous48';
+ALTER TABLE organization ADD COLUMN IF NOT EXISTS income_lookback_days INTEGER NOT NULL DEFAULT 90;
+ALTER TABLE fpl_schedules ADD COLUMN IF NOT EXISTS jurisdiction TEXT;
+ALTER TABLE clients ADD COLUMN IF NOT EXISTS income_worksheet JSONB;
+ALTER TABLE applications ADD COLUMN IF NOT EXISTS income_worksheet JSONB;
+ALTER TABLE applications ADD COLUMN IF NOT EXISTS determination JSONB;
 `;

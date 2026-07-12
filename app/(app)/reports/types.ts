@@ -7,10 +7,20 @@ export interface MiniRow {
 }
 
 export interface MiniTableData {
-  title: string; // "C1 · Sex"
-  code: string;  // "Sec. C1"
+  title: string;     // "C1 · Sex"
+  code: string;      // "Sec. C1"
+  charCode?: string; // catalog characteristic code ("C1", "C5b-source") — drift lookup
   rows: MiniRow[];
+  total: number;     // the characteristic's reportable universe (Σ rows incl. Unknown)
+}
+
+/** Data-quality panel entry: completeness gaps + answer-list drift for one characteristic. */
+export interface DriftEntry {
+  code: string;
+  title: string;
   total: number;
+  unknown: number; // values reported as Unknown/Not Reported
+  drift: Array<{ value: string; count: number }>; // stored values that failed to canonicalize
 }
 
 export interface DomainBar {
@@ -41,6 +51,10 @@ export interface ReportRollup {
   agency: { individualsServed: number; householdsServed: number; newThisFY: number };
   clientCount: number;
   readyPct: number; // % of enrolled records at 100% completeness
+  /** Section C top line: unduplicated individuals/households about whom one or
+      more characteristics were obtained (live records; kv baselines excluded). */
+  sectionCTotals: { individuals: number; households: number };
+  dataQuality: DriftEntry[];
   characteristics: MiniTableData[];
   srvByDomain: DomainBar[];
   topServices: TopService[];

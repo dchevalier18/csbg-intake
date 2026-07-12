@@ -7,6 +7,7 @@ import { I } from "@/components/icons";
 import { useToast } from "@/components/toast";
 import { money } from "@/lib/format";
 import { FPL_BANDS, fplBand } from "@/lib/csbg-catalog";
+import { INCOME_PERIODS, annualizeEntries, type IncomePeriod } from "@/lib/income";
 import { CSBG_CORE } from "@/lib/completeness";
 import { checkDuplicates, submitIntake, type DupMatch } from "./actions";
 import { attachApplicationDoc } from "../eligibility/actions";
@@ -41,6 +42,7 @@ export interface IntakeClientProps {
   docTypes: Record<string, string>;          // doc key → label
   fpl: { year: number; base: number; perAdditional: number }; // ACTIVE schedule
   ceiling: number;                           // org CSBG eligibility ceiling (% of FPL) — fallback before a program is chosen
+  lookbackDays: number;                      // state income-documentation policy (Settings → Organization)
   user: { id: string; name: string };
   prefill: { first: string; last: string; seminarAttendeeId: string };
 }
@@ -48,7 +50,7 @@ export interface IntakeClientProps {
 const parseFieldOptions = (fd: IntakeFieldDef) =>
   (fd.optionsText || "").split(",").map((s) => s.trim()).filter(Boolean);
 
-export function IntakeClient({ lists, fields, programs, requiredDocs, docTypes, fpl, ceiling, prefill }: IntakeClientProps) {
+export function IntakeClient({ lists, fields, programs, requiredDocs, docTypes, fpl, ceiling, lookbackDays, prefill }: IntakeClientProps) {
   const toast = useToast();
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -63,6 +65,37 @@ export function IntakeClient({ lists, fields, programs, requiredDocs, docTypes, 
     program: "",
   }));
   const [docs, setDocs] = useState<Record<string, boolean>>({});
+  // structured income worksheet — entries annualize into the single income figure
+  // (server recomputes; the mirror here keeps the preview honest)
+  const [entries, setEntries] = useState<Array<{ source: string; amount: string; period: IncomePeriod }>>([]);
+  function setEntry(i: number, patch: Partial<{ source: string; amount: string; period: IncomePeriod }>) {
+    setEntries((prev) => {
+      const next = prev.map((e, j) => (j === i ? { ...e, ...patch } : e));
+      syncIncomeFrom(next);
+      return next;
+    });
+  }
+  function addEntry() {
+    setEntries((prev) => {
+      const next = [...prev, { source: "", amount: "", period: "monthly" as IncomePeriod }];
+      return next;
+    });
+  }
+  function removeEntry(i: number) {
+    setEntries((prev) => {
+      const next = prev.filter((_, j) => j !== i);
+      syncIncomeFrom(next);
+      return next;
+    });
+  }
+  function syncIncomeFrom(list: Array<{ source: string; amount: string; period: IncomePeriod }>) {
+    const valid = list.filter((e) => e.source.trim() && Number(e.amount) > 0);
+    if (valid.length > 0) {
+      const total = annualizeEntries(valid.map((e) => ({ source: e.source, amount: Number(e.amount), period: e.period })));
+      setF((prev) => ({ ...prev, income: String(total) }));
+    }
+  }
+  const hasWorksheet = entries.some((e) => e.source.trim() && Number(e.amount) > 0);
   // optional scans attached during intake — uploaded right after the application is created
   const [docFiles, setDocFiles] = useState<Record<string, File>>({});
   const fileRef = useRef<HTMLInputElement>(null);
@@ -153,6 +186,9 @@ export function IntakeClient({ lists, fields, programs, requiredDocs, docTypes, 
         first: f.first, last: f.last, dob: f.dob, phone: f.phone, address: f.address, county: f.county,
         hhType: f.hhType, hhSize: Number(f.hhSize), housing: f.housing,
         income: Number(f.income), incomeSrc: f.incomeSrc,
+        incomeEntries: entries
+          .filter((e) => e.source.trim() && Number(e.amount) > 0)
+          .map((e) => ({ source: e.source.trim(), amount: Number(e.amount), period: e.period })),
         characteristics: Object.fromEntries(fields.map((fd) => [fd.id, f[fd.id] || ""])),
         programId: f.program,
         docs: Object.fromEntries(reqDocs.map((k) => [k, !!docs[k] || !!docFiles[k]])),
@@ -240,12 +276,38 @@ export function IntakeClient({ lists, fields, programs, requiredDocs, docTypes, 
 
           {step === 2 ? (
             <div className="fgrid c2">
-              <Field label="Total annual household income" required hint="Gross, last 12 months or annualized 30-day proof">
-                <input type="number" min="0" value={f.income} onChange={(e) => set("income", e.target.value)} placeholder="$" />
+              <Field label="Total annual household income" required
+                hint={hasWorksheet ? "Computed from the worksheet below" : `Gross, annualized from documented income (${lookbackDays}-day lookback per state policy)`}>
+                <input type="number" min="0" value={f.income} onChange={(e) => set("income", e.target.value)} placeholder="$" disabled={hasWorksheet} />
               </Field>
               <Field label="Income sources (D13)" required>
                 <select value={f.incomeSrc} onChange={(e) => set("incomeSrc", e.target.value)}>{opts(listValues("incomeSrc"))}</select>
               </Field>
+              <div style={{ gridColumn: "span 2" }}>
+                <h3 className="calv-label" style={{ margin: "2px 0 8px" }}>Income worksheet (optional) — entries annualize automatically</h3>
+                {entries.map((e, i) => (
+                  <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 130px 160px auto", gap: 10, marginBottom: 8, alignItems: "end" }}>
+                    <Field label={i === 0 ? "Source (employer, SSI, child support …)" : ""}>
+                      <input value={e.source} onChange={(ev) => setEntry(i, { source: ev.target.value })} placeholder="Source" />
+                    </Field>
+                    <Field label={i === 0 ? "Amount ($)" : ""}>
+                      <input type="number" min="0" step="0.01" value={e.amount} onChange={(ev) => setEntry(i, { amount: ev.target.value })} placeholder="$" />
+                    </Field>
+                    <Field label={i === 0 ? "Paid" : ""}>
+                      <select value={e.period} onChange={(ev) => setEntry(i, { period: ev.target.value as IncomePeriod })}>
+                        {INCOME_PERIODS.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
+                      </select>
+                    </Field>
+                    <button type="button" className="calv-btn calv-btn--quiet calv-btn--sm" onClick={() => removeEntry(i)} style={{ marginBottom: 2 }}>Remove</button>
+                  </div>
+                ))}
+                <button type="button" className="calv-btn calv-btn--quiet calv-btn--sm" onClick={addEntry}>+ Add income entry</button>
+                {hasWorksheet ? (
+                  <span style={{ marginLeft: 12, fontSize: 12.5, color: "var(--calv-slate-65)" }}>
+                    Annualized total: <strong style={{ fontWeight: 600, color: "var(--calv-slate)" }}>{money(Number(f.income) || 0)}/yr</strong> — the worksheet is retained on the application for audit.
+                  </span>
+                ) : null}
+              </div>
               {st && fplPct !== null ? (
                 <div style={{ gridColumn: "span 2", borderRadius: 4, padding: "16px 18px", border: "1px solid", display: "flex", gap: 16, alignItems: "center", background: st.eligible ? "var(--calv-sage-15)" : "var(--calv-red-15)", borderColor: st.eligible ? "var(--calv-sage-35)" : "var(--calv-red-35)" }}>
                   <span style={{ fontFamily: "var(--font-h1)", fontSize: 40, lineHeight: 1, color: st.eligible ? "#2F5A41" : "var(--calv-red)" }}>{fplPct}%</span>
