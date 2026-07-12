@@ -5,6 +5,7 @@ import { db, t } from "@/db";
 import { requireAdmin } from "@/lib/auth";
 import { audit } from "@/lib/access";
 import { getActiveFpl } from "@/lib/fpl";
+import { officialFpl, JURISDICTIONS, jurisdictionLabel, type Jurisdiction } from "@/lib/fpl-data";
 import { OPEN_STAGES } from "@/lib/data/core";
 import { todayIso } from "@/lib/format";
 
@@ -70,15 +71,53 @@ export async function publishFpl(year: number, base: number, perAdditional: numb
   }
   const existing = (await db.select().from(t.fplSchedules).where(eq(t.fplSchedules.year, y)))[0];
   if (existing) return { ok: false, message: `FPL ${y} already exists in the guideline history.` };
+  const org = (await db.select().from(t.organization).where(eq(t.organization.id, 1)))[0];
+  const jurisdiction = org?.jurisdiction ?? "contiguous48";
+  // warn-don't-block: agencies may publish state-specific figures on purpose
+  const official = officialFpl(y, jurisdiction as Jurisdiction);
+  const matchesOfficial = official && official.base === b && official.perAdditional === p;
   await db.update(t.fplSchedules).set({ status: "archived" });
-  await db.insert(t.fplSchedules).values({ year: y, base: b, perAdditional: p, effective: todayIso(), status: "active" });
+  await db.insert(t.fplSchedules).values({
+    year: y, base: b, perAdditional: p,
+    effective: official?.effective ?? todayIso(),
+    status: "active",
+    jurisdiction,
+  });
   const clientCount = (await db.select({ id: t.clients.id }).from(t.clients)).length;
   const openApps = (await db.select({ stage: t.applications.stage }).from(t.applications))
     .filter((a) => (OPEN_STAGES as readonly string[]).includes(a.stage)).length;
   const n = clientCount + openApps;
-  await audit(admin.id, "fpl.publish", "fpl", String(y), `Published FPL ${y} — household of 1 $${b}, each additional $${p}; ${n} cases stay pinned`);
+  await audit(admin.id, "fpl.publish", "fpl", String(y),
+    `Published FPL ${y} (${jurisdictionLabel(jurisdiction)}) — household of 1 $${b}, each additional $${p}; ${n} cases stay pinned`);
   revalidatePath("/", "layout");
-  return { ok: true, message: `FPL ${y} is now active. ${n} existing cases remain pinned to the schedule they were assessed under.` };
+  return {
+    ok: true,
+    message: `FPL ${y} is now active. ${n} existing cases remain pinned to the schedule they were assessed under.` +
+      (official && !matchesOfficial
+        ? ` Note: the published HHS ${y} table for ${jurisdictionLabel(jurisdiction)} is $${official.base} + $${official.perAdditional} — double-check the figures if that wasn't intentional.`
+        : ""),
+  };
+}
+
+/** Official HHS figures for a year under the agency's jurisdiction — used by the
+    Settings UI to prefill "Publish new year". */
+export async function officialFplFor(year: number): Promise<{ base: number; perAdditional: number; effective: string; jurisdiction: string; label: string } | null> {
+  await requireAdmin();
+  const org = (await db.select().from(t.organization).where(eq(t.organization.id, 1)))[0];
+  const jurisdiction = (org?.jurisdiction ?? "contiguous48") as Jurisdiction;
+  const o = officialFpl(Math.round(Number(year)), jurisdiction);
+  return o ? { ...o, jurisdiction, label: jurisdictionLabel(jurisdiction) } : null;
+}
+
+/** Agency jurisdiction (which HHS table applies) — affects FUTURE publishes only;
+    published schedules keep their stored dollars. */
+export async function setJurisdiction(id: string): Promise<ActionResult> {
+  const admin = await requireAdmin();
+  if (!JURISDICTIONS.some((j) => j.id === id)) return { ok: false, message: "Pick a valid jurisdiction." };
+  await db.update(t.organization).set({ jurisdiction: id }).where(eq(t.organization.id, 1));
+  await audit(admin.id, "org.jurisdiction", "organization", "1", `FPL jurisdiction → ${jurisdictionLabel(id)}`);
+  revalidatePath("/", "layout");
+  return { ok: true, message: `Guideline table set to ${jurisdictionLabel(id)}. Published years keep their stored dollars.` };
 }
 
 export async function makeFplActive(year: number): Promise<ActionResult> {

@@ -1,11 +1,15 @@
 // CSBG Annual Report 3.0 taxonomy (OMB 0970-0492) — extracted from the official form.
 //
-// Source: Module 3 (Individual and Family Level) of the CSBG Annual Report 3.0:
+// Source: Module 4 (Individual and Family Level) of the CSBG Annual Report 3.0:
 //   Section A — Individual and Family Services (SDA / SRV codes)
 //   Section B — Individual and Family National Performance Indicators (FNPI codes)
 //   Section C — All Characteristics Report (C1–C8 individual, D9–D13 household)
 // Note: the 3.0 form has no FNPI 7 series and no D14 category; the domain for
 // SRV 7 is "Transportation" in the 3.0 form (id kept as "tra" by contract).
+// Verification status + instrument mapping: docs/compliance/ar-3.0.md
+
+/** Bump on any change that tracks a federal instrument revision. */
+export const CATALOG_VERSION = "AR-3.0";
 
 export interface ServiceDomain { id: string; code: string; name: string }
 export interface ServiceDef { code: string; domain: string; label: string }
@@ -355,3 +359,61 @@ export function fplBand(pct: number): number {
 export const serviceByCode = (c: string) => SERVICES.find(s => s.code === c);
 export const domainById = (id: string) => DOMAINS.find(d => d.id === id);
 export const fnpiByCode = (c: string) => FNPIS.find(f => f.code === c);
+export const characteristicByCode = (c: string) => CHARACTERISTICS.find(x => x.code === c);
+
+/* ============================================================
+   Canonicalization — report output must use the instrument's
+   exact answer strings even when an agency's display lists use
+   shortened wording. Stored values that can't be canonicalized
+   land in Unknown/Not Reported and are surfaced as data-quality
+   drift on the Reports page.
+   ============================================================ */
+
+// Known display-value shorthands → instrument canon, per characteristic.
+const CANON_ALIASES: Record<string, Record<string, string>> = {
+  C3: {
+    "Grades 9-12 / Non-Graduate": "Grades 9-12 or Non-Graduate",
+    "High School Graduate / GED": "High School Graduate, GED, or Equivalency Diploma",
+    "Other post-secondary graduate": "Graduate of other post-secondary school",
+  },
+  C6: {
+    "Native Hawaiian / Pacific Islander": "Native Hawaiian and Pacific Islander",
+    "Multiracial or Multiethnic": "Multiracial or Multiethnic (two or more of the above)",
+  },
+  C8: {
+    "Unemployed (Short-Term)": "Unemployed (Short-Term, 6 months or less)",
+    "Unemployed (Long-Term)": "Unemployed (Long-Term, more than 6 months)",
+  },
+  D9: {
+    "Multiple adults no children": "Household with multiple adults with no children",
+  },
+  D13: {
+    "Employment Only": "Income from Employment Only",
+    "Employment and Other Income Source": "Income from Employment and Other Income Source",
+    "Employment, Other Source, and Non-Cash Benefits": "Income from Employment, Other Income Source, and Non-Cash Benefits",
+    "Employment and Non-Cash Benefits": "Income from Employment and Non-Cash Benefits",
+  },
+};
+
+const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+
+// per-characteristic lookup: normalized option/alias → canonical option
+const canonLookup = new Map<string, Map<string, string>>(
+  CHARACTERISTICS.map((c) => {
+    const m = new Map<string, string>();
+    for (const opt of c.options) m.set(normalize(opt), opt);
+    for (const [alias, canon] of Object.entries(CANON_ALIASES[c.code] ?? {})) {
+      m.set(normalize(alias), canon);
+    }
+    return [c.code, m];
+  }),
+);
+
+/** Stored answer → the instrument's canonical option string, or null when the
+    value can't be mapped (reported as Unknown/Not Reported + drift). */
+export function canonicalCharacteristic(code: string, value: string | null | undefined): string | null {
+  if (value == null) return null;
+  const v = String(value).trim();
+  if (v === "") return null;
+  return canonLookup.get(code)?.get(normalize(v)) ?? null;
+}

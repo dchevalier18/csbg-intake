@@ -6,8 +6,9 @@ import { eq } from "drizzle-orm";
 import { db, t } from "@/db";
 import { requireUser } from "@/lib/auth";
 import { audit, userCanSeeProgram, visibleProgramIds } from "@/lib/access";
-import { getEnabledIntakeFields, nextApplicationId, programCeiling, requiredDocKeys } from "@/lib/data/core";
+import { getEnabledIntakeFields, getOrg, nextApplicationId, programCeiling, requiredDocKeys } from "@/lib/data/core";
 import { getActiveFpl, fplStatusFor } from "@/lib/fpl";
+import { normalizeWorksheet } from "@/lib/income";
 import { todayIso } from "@/lib/format";
 
 export interface DupMatch { id: string; first: string; last: string; dob: string; inScope: boolean }
@@ -56,6 +57,8 @@ export interface IntakePayload {
   housing: string;
   income: number;
   incomeSrc: string;
+  /** optional structured income entries; when present they annualize into `income` */
+  incomeEntries?: Array<{ source: string; amount: number; period: string }>;
   /** intake-field values keyed by field id (builtin + custom) */
   characteristics: Record<string, string>;
   programId: string;
@@ -84,7 +87,11 @@ export async function submitIntake(payload: IntakePayload): Promise<{ ok: true; 
   const ceiling = await programCeiling(payload.programId);
   const active = await getActiveFpl(); // NEW intakes always pin the ACTIVE schedule year
   const hhSize = Math.min(12, Math.max(1, Math.round(Number(payload.hhSize) || 1)));
-  const income = Math.max(0, Math.round(Number(payload.income) || 0));
+  // Structured worksheet (when provided) is authoritative: entries annualize
+  // server-side into the single gross-annual figure the FPL math uses.
+  const org = await getOrg();
+  const worksheet = normalizeWorksheet({ entries: payload.incomeEntries ?? [] }, org.incomeLookbackDays);
+  const income = worksheet ? worksheet.annualized : Math.max(0, Math.round(Number(payload.income) || 0));
   const st = await fplStatusFor(income, hhSize, active.year, ceiling);
 
   // split characteristic answers: builtin field ids are application columns,
@@ -127,6 +134,7 @@ export async function submitIntake(payload: IntakePayload): Promise<{ ok: true; 
     housing: payload.housing || null,
     income,
     incomeSrc: payload.incomeSrc || null,
+    incomeWorksheet: worksheet,
     custom,
     programId: payload.programId,
     caseworkerId: user.id,

@@ -133,7 +133,7 @@ function ServiceEditor({ service, domains, onClose, toast }: {
         <Field label="Label" required>
           <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="What staff see in the picker" autoFocus={!isNew} />
         </Field>
-        <Field label="Reporting domain" required hint="Where this service tallies in Module 3, Section A.">
+        <Field label="Reporting domain" required hint="Where this service tallies in Module 4, Section A.">
           <select value={domain} onChange={(e) => setDomain(e.target.value)}>
             {domains.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
           </select>

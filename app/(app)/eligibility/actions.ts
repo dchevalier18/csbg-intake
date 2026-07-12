@@ -11,9 +11,29 @@ import type { Application, User } from "@/db/schema";
 import { requireUser } from "@/lib/auth";
 import { getProgram, userCanSeeProgram, audit } from "@/lib/access";
 import { getEnabledIntakeFields, requiredDocKeys, applicationDocsVerified, programCeiling, OPEN_STAGES, nextClientId } from "@/lib/data/core";
-import { fplStatusFor, getActiveFpl } from "@/lib/fpl";
+import { fplStatusFor, fplSchedule, getActiveFpl, type FplStatus } from "@/lib/fpl";
 import { checkUpload } from "@/lib/uploads";
 import { localDateOf, shortDate, todayIso } from "@/lib/format";
+import type { Determination } from "@/db/schema";
+
+/** Freeze the exact eligibility math a decision used — guideline dollars,
+    ceiling, inputs, computed % — so the determination outlives any later
+    schedule/ceiling/jurisdiction change. */
+async function buildDetermination(app: Application, st: FplStatus, ceiling: number): Promise<Determination> {
+  const sched = await fplSchedule(app.fplYear);
+  return {
+    at: new Date().toISOString(),
+    year: sched.year,
+    jurisdiction: sched.jurisdiction ?? null,
+    base: sched.base,
+    perAdditional: sched.perAdditional,
+    ceiling,
+    income: app.income,
+    hhSize: app.hhSize,
+    pct: st.pct,
+    eligible: st.eligible,
+  };
+}
 
 export interface ActionResult {
   ok: boolean;
@@ -377,11 +397,14 @@ export async function denyApplication(appId: string, note: string): Promise<Acti
   if (trimmed.length < 8) {
     return { ok: false, message: "A denial reason (at least 8 characters) is required." };
   }
+  const ceiling = await programCeiling(app.programId);
+  const st = await fplStatusFor(app.income, app.hhSize, app.fplYear, ceiling);
   await db.update(t.applications).set({
     stage: "denied",
     decisionNote: trimmed,
     decidedBy: user.id,
     decidedAt: new Date().toISOString(),
+    determination: await buildDetermination(app, st, ceiling),
   }).where(eq(t.applications.id, app.id));
   await audit(user.id, "application.deny", "application", app.id, trimmed);
   revalidateQueue();
@@ -467,6 +490,7 @@ export async function approveApplication(appId: string): Promise<ActionResult> {
 
   const today = todayIso();
   const now = new Date().toISOString();
+  const determination = await buildDetermination(app, st, ceiling);
 
   // ---- linked application → enroll the existing client in the program ----
   if (app.clientId) {
@@ -486,6 +510,7 @@ export async function approveApplication(appId: string): Promise<ActionResult> {
         stage: "approved",
         decidedBy: user.id,
         decidedAt: now,
+        determination,
       }).where(eq(t.applications.id, app.id));
       await tx.insert(t.serviceLog).values({
         date: today,
@@ -539,6 +564,7 @@ export async function approveApplication(appId: string): Promise<ActionResult> {
       housing: app.housing,
       income: app.income,
       incomeSrc: app.incomeSrc,
+      incomeWorksheet: app.incomeWorksheet, // structured entries carry to the client record
       caseworkerId: app.caseworkerId,
       enrolled: today,
       fplYear: app.fplYear,            // point-in-time pin carried from the application
@@ -554,6 +580,7 @@ export async function approveApplication(appId: string): Promise<ActionResult> {
       clientId,
       decidedBy: user.id,
       decidedAt: now,
+      determination,
     }).where(eq(t.applications.id, app.id));
     await tx.insert(t.serviceLog).values({
       date: today,
