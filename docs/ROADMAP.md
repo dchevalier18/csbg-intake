@@ -1,11 +1,11 @@
-# CAP Intake — Open-Source Release Roadmap
+# CAP Trellis — Open-Source Release Roadmap
 
 **Prepared:** July 2026 · **Status:** DRAFT for review — no implementation has begun
 **Scope:** Review of the csbg-intake prototype against (a) the software systems Community
 Action Agencies use today and (b) the federal data requirements of the **CSBG Annual
 Report 3.0** (OMB No. 0970-0492), Module 4 Section C, and the **HHS Federal Poverty
 Guidelines** — followed by a phased plan to complete the project as an open-source
-product ("CAP Intake") for Community Action Agencies nationwide.
+product ("CAP Trellis") for Community Action Agencies nationwide.
 
 ---
 
@@ -148,9 +148,11 @@ project rather than a repo.
   about encryption, RBAC, audit logs, MFA, breach procedures, and US data residency —
   HIPAA-alignment language is the de facto benchmark even where HIPAA doesn't apply.
 - **Naming note**: a zero-star PHP repo named `filmdc/capintake` ("open-source client
-  intake for CAAs," created March 2026) already exists on GitHub. Before public launch
-  we should pick and check a distinct name (e.g., "CAP Intake" as a brand with a
-  distinct repo/package name) — flagged as an open decision in §8.
+  intake for CAAs," created March 2026) already exists on GitHub, so "capintake" was
+  ruled out. **Decided (July 2026): the product name is "CAP Trellis"** — a trellis is
+  a structure that supports growth, and the name carries the movement's "CAP"
+  abbreviation. Before public launch: USPTO search in software classes, and claim the
+  GitHub org, npm name, and domain (see §8).
 
 ---
 
@@ -378,7 +380,7 @@ Section A/B/C rollup for FY26 whose every number is traceable to client/service 
    generic demo seed; `logoMode` default `wordmark`.
 2. **First-run setup wizard**: "Where should this run?" (local vs guided cloud options),
    **database configuration step** (embedded / connect existing PostgreSQL with
-   test-connection / attach a prior CAP Intake database with auto-backup + migration /
+   test-connection / attach a prior CAP Trellis database with auto-backup + migration /
    restore from backup), org profile, jurisdiction, first admin (forced password set),
    FPL confirmation, ceiling policy, program creation from templates **or the
    initial-setup Excel master-data workbook** (programs, services, users, doc types,
@@ -491,7 +493,7 @@ requires an internet-reachable tier — local installs get everything else.
 A small management panel installed with the local tier (tray app or a supervisor's
 localhost-only page — implementation detail, behavior is the contract):
 
-- **Start / stop / restart / status**, and an "Open CAP Intake" button.
+- **Start / stop / restart / status**, and an "Open CAP Trellis" button.
 - **Change port** without editing anything.
 - **Network reachability toggle**, in plain language: *"Only this computer"*
   (bind 127.0.0.1) vs *"Other computers in this office"* (bind LAN + installer-managed
@@ -512,7 +514,7 @@ A first-run (and Settings-reachable) database step with four plain-language choi
 2. **"Connect to an existing PostgreSQL server"** — host/port/database/user fields, a
    **Test connection** button, and errors translated to actions ("the server refused the
    password" not `FATAL 28P01`).
-3. **"Attach a previously created CAP Intake database"** — point at an existing
+3. **"Attach a previously created CAP Trellis database"** — point at an existing
    database (or take over one restored by IT): the wizard detects its schema version,
    takes an automatic backup, runs pending migrations, and confirms record counts
    before switching over.
@@ -636,19 +638,31 @@ step (not the tester) is the bug.
 
 ---
 
-## 8. Open decisions (need your call before implementation)
+## 8. Decisions (resolved July 2026)
 
-1. **License**: AGPL-3.0 (protects against closed hosted forks; some agencies/vendors
-   shy away) vs Apache-2.0/MIT (maximum adoption; a vendor could commercialize a closed
-   fork). Recommendation: **AGPL-3.0** for the app — the buyer is agencies, not
-   library users, and AGPL preserves the open ecosystem that is the project's reason to exist.
-2. **Name**: "capintake" collides with an existing (inactive) GitHub repo; "CAP Intake"
-   as brand with a distinct repo/org name (e.g., `cap-intake`, `capworks`, `opencap`)
-   needs a trademark-and-collision check.
-3. **Multi-tenancy**: recommend documented single-tenant-per-deployment for v1 (§6 Phase 3).
-4. **Governance/sustainability** model (§6 Phase 5) — who stewards, who hosts, what's paid.
-5. **Scope of Phase 4 ROMA work** — minimal Org-Standard-4.3 evidence vs a fuller
-   planning module (recommend minimal first).
+All five open decisions were reviewed and settled by the project owner:
+
+1. **License: Apache-2.0.** Maximum-adoption licensing; add LICENSE, `package.json`
+   `"license": "Apache-2.0"`, and a NOTICE file in Phase 1.
+2. **Name: CAP Trellis.** A trellis is a structure that supports growth; the name
+   carries the movement's "CAP" abbreviation. Checked candidates that were ruled out
+   for collisions: Sunflower (existing Kansas community-action nonprofit), CAPworks
+   (multiple existing software products), OpenCAA (existing assistive-communication
+   platform), Common Action (existing organization), capintake (existing GitHub repo).
+   Pre-launch checklist: USPTO TESS search in software classes; claim the GitHub org,
+   npm name, and a domain.
+3. **Multi-tenancy: single-tenant, one deployment per agency** for v1 (§6 Phase 3);
+   revisit only if a hosted offering demands it.
+4. **Governance/sustainability: "A now, B by design."** Start under CALV/CACLV
+   stewardship to ship fast, with a published governance charter committing to
+   (a) Apache-2.0 code as permanent fork insurance, (b) an advisory council of the
+   first ~3–5 adopting agencies as soon as they exist, and (c) transition to an
+   agency co-op or fiscally-sponsored entity once adoption reaches a stated threshold
+   (~5 production agencies) — the empowOR pattern: single-agency origin, network
+   sustainability.
+5. **ROMA scope: minimal first** — Org-Standard-4.3 evidence (goals linked to FNPI
+   targets, needs-assessment notes, board-ready outcome dashboard) in Phase 4; a
+   fuller planning module only if adopters ask for it.
 
 ---
 
