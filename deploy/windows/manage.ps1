@@ -42,7 +42,14 @@ function Stop-Server {
     ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }
 }
 
-function Start-Server { schtasks /Run /TN $TaskName | Out-Null }
+function Start-Server {
+  schtasks /Run /TN $TaskName 2>$null | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    # no scheduled task (Startup-folder installs) - launch the runner directly
+    $runner = Join-Path $Root "deploy\windows\run-server.ps1"
+    Start-Process powershell -ArgumentList "-WindowStyle","Hidden","-ExecutionPolicy","Bypass","-File",$runner -WindowStyle Hidden
+  }
+}
 
 function Show-Status {
   $port = Get-Port
@@ -59,7 +66,14 @@ function Show-Status {
     Write-Host "  Office LAN: off (this computer only)"
   }
   Write-Host  "  Data:       $Root\data  (database + uploads + server.log - BACK THIS FOLDER UP)"
-  Write-Host  "  Autostart:  task '$TaskName' runs when you sign in to Windows"
+  schtasks /Query /TN $TaskName 2>$null | Out-Null
+  if ($LASTEXITCODE -eq 0) {
+    Write-Host "  Autostart:  scheduled task '$TaskName' (at sign-in)"
+  } elseif (Test-Path (Join-Path ([Environment]::GetFolderPath("Startup")) "CAPTrellis.cmd")) {
+    Write-Host "  Autostart:  Startup-folder launcher (at sign-in)"
+  } else {
+    Write-Host "  Autostart:  NOT registered - re-run deploy\windows\install.ps1" -ForegroundColor Yellow
+  }
   Write-Host ""
 }
 

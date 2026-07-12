@@ -16,7 +16,8 @@ Works offline after the initial `npm ci`.
    powershell -ExecutionPolicy Bypass -File deploy\windows\install.ps1
    ```
 
-That builds the app, registers a **start-at-sign-in task**, starts the server,
+That builds the app, registers **start-at-sign-in** (a scheduled task, or a
+Startup-folder launcher when task creation needs admin rights), starts the server,
 and opens the **/setup wizard** (agency profile + first administrator — no
 demo data on this path).
 
@@ -48,7 +49,8 @@ JSON full-data export.
 ## Uninstall
 
 ```powershell
-schtasks /Delete /F /TN CAPTrellis
+schtasks /Delete /F /TN CAPTrellis 2>$null
+Remove-Item "$([Environment]::GetFolderPath('Startup'))\CAPTrellis.cmd" -ErrorAction SilentlyContinue
 netsh advfirewall firewall delete rule name="CAP Trellis (staff LAN access)"
 ```
 
