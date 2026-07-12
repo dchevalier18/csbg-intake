@@ -27,6 +27,7 @@ export interface OrgProfileInput {
   fyStart: string;
   csbgCeiling: number;
   incomeLookbackDays: number;
+  contactLine: string;
 }
 
 export async function updateOrgProfile(input: OrgProfileInput): Promise<ActionResult> {
@@ -45,6 +46,7 @@ export async function updateOrgProfile(input: OrgProfileInput): Promise<ActionRe
       fyStart,
       csbgCeiling,
       incomeLookbackDays,
+      contactLine: (input.contactLine ?? "").trim().slice(0, 120),
     })
     .where(eq(t.organization.id, 1))
     ;

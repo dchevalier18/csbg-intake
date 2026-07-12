@@ -26,9 +26,9 @@ const barlow = Barlow({
 });
 
 export const metadata: Metadata = {
-  title: "CSBG Client Intake System",
+  title: "CAP Trellis",
   description:
-    "Configurable client intake, eligibility, and service management for Community Action Agencies — CSBG Annual Report 3.0 (OMB 0970-0492)",
+    "Open-source client intake, eligibility, and service management for Community Action Agencies — CSBG Annual Report 3.0 (OMB 0970-0492)",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

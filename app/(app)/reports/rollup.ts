@@ -252,6 +252,25 @@ export async function buildRollup(): Promise<ReportRollup> {
     .filter((f) => f.served > 0 || f.target > 0)
     .sort((a, b) => a.code.localeCompare(b.code, "en", { numeric: true }));
 
+  // ---------- ROMA goals (Org Standard 4.3) — goal → linked FNPI progress ----------
+  const fnpiByCodeMap = new Map(fnpi.map((f) => [f.code, f]));
+  const roma = (await db.select().from(t.romaGoals))
+    .sort((a, b) => a.sort - b.sort || a.id - b.id)
+    .map((g) => {
+      const linked = g.fnpiCodes.map((code) => fnpiByCodeMap.get(code) ?? {
+        code, label: fnpiByCode(code)?.label ?? code, served: 0, target: 0, actual: 0,
+      });
+      return {
+        id: g.id,
+        title: g.title,
+        description: g.description,
+        indicators: linked,
+        served: linked.reduce((s, f) => s + f.served, 0),
+        target: linked.reduce((s, f) => s + f.target, 0),
+        actual: linked.reduce((s, f) => s + f.actual, 0),
+      };
+    });
+
   return {
     fy: { label: fy.label, short: fy.short, range: fy.range, pctElapsed: fy.pctElapsed },
     orgName: org.name,
@@ -261,6 +280,7 @@ export async function buildRollup(): Promise<ReportRollup> {
     readyPct,
     sectionCTotals,
     dataQuality,
+    roma,
     characteristics,
     srvByDomain,
     topServices,

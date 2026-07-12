@@ -77,7 +77,7 @@ export default async function PortalPage({ params }: { params: Promise<{ token: 
       docs={docs}
       appointment={appointment}
       caseworkerName={cw?.name ?? "your case worker"}
-      org={{ name: org.name, short: org.short, logoMode: org.logoMode, logoData: org.logoData }}
+      org={{ name: org.name, short: org.short, logoMode: org.logoMode, logoData: org.logoData, contactLine: org.contactLine }}
     />
   );
 }

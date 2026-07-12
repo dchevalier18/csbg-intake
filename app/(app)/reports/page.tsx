@@ -1,4 +1,5 @@
-import { requireUser } from "@/lib/auth";
+import { requireUser, isAdmin } from "@/lib/auth";
+import { FNPIS } from "@/lib/csbg-catalog";
 import { buildRollup } from "./rollup";
 import { ReportsClient } from "./reports-client";
 
@@ -6,7 +7,13 @@ import { ReportsClient } from "./reports-client";
    Report's unduplicated-count rules. Auth still required; no program scoping. */
 
 export default async function ReportsPage() {
-  await requireUser();
+  const user = await requireUser();
   const data = await buildRollup();
-  return <ReportsClient data={data} />;
+  return (
+    <ReportsClient
+      data={data}
+      canManageGoals={isAdmin(user)}
+      fnpiOptions={FNPIS.map((f) => ({ code: f.code, label: f.label }))}
+    />
+  );
 }
