@@ -183,9 +183,14 @@ declare global {
   var __csbgConn: Conn | undefined;
 }
 
-// survive Next.js dev-mode hot reloads with a single pool/engine
-const conn: Conn = globalThis.__csbgConn ?? (EMBEDDED ? createPgliteConn() : createPgConn());
-if (process.env.NODE_ENV !== "production") globalThis.__csbgConn = conn;
+// One connection per PROCESS, cached on globalThis — always, not just in dev.
+// Dev needs it to survive hot reloads, but production needs it too: Next.js
+// compiles server actions (reached via a client component's import) in a
+// separate webpack layer from server-component pages, so this module is
+// instantiated once per layer. Without the global cache each copy opened its
+// own engine — two embedded PGlite engines on one data dir either abort the
+// WASM runtime or split-brain (an action's writes invisible to every page).
+const conn: Conn = (globalThis.__csbgConn ??= EMBEDDED ? createPgliteConn() : createPgConn());
 
 export const db: DB = conn.db;
 

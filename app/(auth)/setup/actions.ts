@@ -44,30 +44,36 @@ export async function completeSetup(_prev: SetupState, formData: FormData): Prom
   if (!CEILINGS.includes(csbgCeiling)) return { error: "Pick a valid income ceiling." };
   if (!LOOKBACKS.includes(incomeLookbackDays)) return { error: "Pick a valid income lookback." };
 
-  await db.update(t.organization).set({
-    name: orgName,
-    short: short || initialsOf(orgName),
-    region,
-    jurisdiction,
-    csbgCeiling,
-    incomeLookbackDays,
-    logoMode: "wordmark",
-  }).where(eq(t.organization.id, 1));
-
   const userId = "admin";
-  await db.insert(t.users).values({
-    id: userId,
-    name: adminName,
-    username,
-    passwordHash: hashPassword(password),
-    role: "Data Admin",
-    access: "all",
-    initials: initialsOf(adminName),
-    active: 1,
-  });
+  try {
+    await db.update(t.organization).set({
+      name: orgName,
+      short: short || initialsOf(orgName),
+      region,
+      jurisdiction,
+      csbgCeiling,
+      incomeLookbackDays,
+      logoMode: "wordmark",
+    }).where(eq(t.organization.id, 1));
 
-  await audit(userId, "setup.complete", "organization", "1",
-    `First-run setup — ${orgName} (${jurisdiction}, ${csbgCeiling}% ceiling, ${incomeLookbackDays}-day lookback); administrator ${username} created`);
-  await createSession(userId);
+    await db.insert(t.users).values({
+      id: userId,
+      name: adminName,
+      username,
+      passwordHash: hashPassword(password),
+      role: "Data Admin",
+      access: "all",
+      initials: initialsOf(adminName),
+      active: 1,
+    });
+
+    await audit(userId, "setup.complete", "organization", "1",
+      `First-run setup — ${orgName} (${jurisdiction}, ${csbgCeiling}% ceiling, ${incomeLookbackDays}-day lookback); administrator ${username} created`);
+    await createSession(userId);
+  } catch (err) {
+    // Setup must never fail silently — surface the failure in the form.
+    console.error("[setup] first-run setup failed:", err);
+    return { error: "Setup couldn't be completed — the server reported an error. Details were written to data/server.log; fix the cause and submit again." };
+  }
   redirect("/settings/programs");
 }
