@@ -12,7 +12,7 @@ import { portalUploadDoc } from "./actions";
 
 export type PortalHintKey = "received" | "verified" | "income" | "residency" | "id" | "generic";
 export interface PortalDoc { key: string; label: string; status: string; hintKey: PortalHintKey }
-export interface PortalOrg { name: string; short: string; logoMode: string; logoData: string | null }
+export interface PortalOrg { name: string; short: string; logoMode: string; logoData: string | null; contactLine: string }
 export interface PortalAppointment { what: string; when: string; where: string }
 
 type Lang = "en" | "es";
@@ -31,7 +31,6 @@ const STR: Record<Lang, {
   chipSubmitted: string;
   chipVerified: string;
   questions: (n: string) => string;
-  hours: string;
   toast: (cw: string) => string;
   enrolledTitle: string;
   enrolledBody: (program: string) => string;
@@ -63,7 +62,6 @@ const STR: Record<Lang, {
     chipSubmitted: "Submitted",
     chipVerified: "Verified",
     questions: (n) => `Questions? Call ${n}`,
-    hours: "(610) 691-5620 · Mon–Fri 8:30–4:30",
     toast: (cw) => `Document received — ${cw} is notified and the eligibility queue updates in real time.`,
     enrolledTitle: "You're enrolled!",
     enrolledBody: (program) => `Welcome to ${program}. Your case worker will reach out with next steps.`,
@@ -97,7 +95,6 @@ const STR: Record<Lang, {
     chipSubmitted: "Enviado",
     chipVerified: "Verificado",
     questions: (n) => `¿Preguntas? Llama a ${n}`,
-    hours: "(610) 691-5620 · Lun–Vie 8:30–4:30",
     toast: (cw) => `Documento recibido — ${cw} recibirá un aviso y tu lista se actualiza al momento.`,
     enrolledTitle: "¡Estás inscrito!",
     enrolledBody: (program) => `Bienvenido a ${program}. Tu trabajador social te contactará con los próximos pasos.`,
@@ -257,8 +254,8 @@ export function PortalClient({ token, first, appId, programName, stage, appliedS
       <div style={{ background: "var(--calv-teal-15)", borderRadius: 6, padding: "13px 16px", display: "flex", gap: 10, alignItems: "center" }}>
         <I name="phone" size={16} style={{ color: "var(--calv-teal)" }} />
         <div style={{ fontSize: 13, lineHeight: 1.45 }}>
-          <strong style={{ fontWeight: 600 }}>{s.questions(caseworkerName)}</strong><br />
-          <span style={{ color: "var(--calv-slate-65)" }}>{s.hours}</span>
+          <strong style={{ fontWeight: 600 }}>{s.questions(caseworkerName)}</strong>
+          {org.contactLine ? <><br /><span style={{ color: "var(--calv-slate-65)" }}>{org.contactLine}</span></> : null}
         </div>
       </div>
     </div>

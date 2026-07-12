@@ -25,6 +25,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
 
   return (
     <ToastProvider>
+      <a href="#main" className="skip-link">Skip to main content</a>
       <div className="app" style={{ "--brand": org.accent } as CSSProperties}>
         <Sidebar
           org={{ name: org.name, short: org.short, logoMode: org.logoMode, logoData: org.logoData }}
@@ -33,7 +34,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
           applicantCount={openCount}
           fy={{ label: fy.label, range: fy.range, pctElapsed: fy.pctElapsed }}
         />
-        <main className="content">
+        <main className="content" id="main">
           <Topbar
             user={{ name: user.name, role: user.role, initials: user.initials }}
             fyLabel={fy.label}
