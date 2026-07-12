@@ -20,10 +20,11 @@ export interface ClientRow {
   nextFollowUp: string;
 }
 
-export function ClientsDirectory({ rows, programs, caseworkers }: {
+export function ClientsDirectory({ rows, programs, caseworkers, canExport }: {
   rows: ClientRow[];
   programs: { id: string; name: string }[];
   caseworkers: { id: string; name: string }[];
+  canExport?: boolean;
 }) {
   const router = useRouter();
   const [prog, setProg] = useState("all");
@@ -47,6 +48,12 @@ export function ClientsDirectory({ rows, programs, caseworkers }: {
           </select>
         </div>
         <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--calv-slate-65)" }}>{shown.length} shown</span>
+        {canExport ? (
+          <a className="calv-btn calv-btn--quiet calv-btn--sm" href="/clients/export-hmis" download
+            title="HUD-shaped client CSV for HMIS/CoC coordination">
+            HMIS-aligned CSV
+          </a>
+        ) : null}
       </div>
 
       <Panel>
