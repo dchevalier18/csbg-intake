@@ -12,6 +12,7 @@ import { requireUser } from "@/lib/auth";
 import { getProgram, userCanSeeProgram, audit } from "@/lib/access";
 import { getEnabledIntakeFields, requiredDocKeys, applicationDocsVerified, programCeiling, OPEN_STAGES, nextClientId } from "@/lib/data/core";
 import { fplStatusFor, getActiveFpl } from "@/lib/fpl";
+import { checkUpload } from "@/lib/uploads";
 import { localDateOf, shortDate, todayIso } from "@/lib/format";
 
 export interface ActionResult {
@@ -50,8 +51,6 @@ async function syncDocChecklist(appId: string, programId: string): Promise<void>
 
 /* ---------- document verification (attach / verify / signed bypass / undo) ---------- */
 
-const UPLOAD_EXTENSIONS = [".pdf", ".jpg", ".jpeg", ".png", ".heic", ".tif", ".tiff"];
-const MAX_UPLOAD_BYTES = 4 * 1024 * 1024;
 const UPLOADS_DIR = path.join(process.cwd(), "data", "uploads");
 
 /** Shared guard for the per-document actions: load + access + open stage + requirement.
@@ -109,15 +108,9 @@ export async function attachApplicationDoc(appId: string, docKey: string, filena
   const g = await guardDocAction(user, appId, docKey);
   if (!g.ok) return { ok: false, message: g.message };
 
-  const ext = path.extname(filename ?? "").toLowerCase();
-  if (!UPLOAD_EXTENSIONS.includes(ext)) {
-    return { ok: false, message: "That file type isn't supported — upload a PDF or a scanned image (JPG, PNG, HEIC, TIFF)." };
-  }
-  const buf = Buffer.from(String(base64 ?? ""), "base64");
-  if (buf.length === 0) return { ok: false, message: "That file looks empty — rescan the document and try again." };
-  if (buf.length > MAX_UPLOAD_BYTES) {
-    return { ok: false, message: "Files up to 4 MB are supported — scan at a lower resolution or split the document." };
-  }
+  const checked = checkUpload(filename, base64);
+  if (!checked.ok) return { ok: false, message: checked.message };
+  const { ext, buf } = checked;
 
   const dir = path.join(UPLOADS_DIR, safeSegment(g.app.id));
   fs.mkdirSync(dir, { recursive: true });

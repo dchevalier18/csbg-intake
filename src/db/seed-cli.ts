@@ -1,16 +1,18 @@
-/* Reset + reseed the database from scratch: `npm run seed` */
-import { Client } from "pg";
-import { getTableName, is } from "drizzle-orm";
+/* Reset + reseed the database from scratch: `npm run seed`
+   Driver-agnostic: drops through the shared db handle, so it works against
+   both PostgreSQL (postgres://) and the embedded engine (pglite://). */
+import { sql, getTableName, is } from "drizzle-orm";
 import { PgTable } from "drizzle-orm/pg-core";
 import * as schema from "./schema";
-import { databaseUrl, dbReady, databaseInfo } from "./index";
+import { db, dbReady, dbResetBootstrap, databaseInfo } from "./index";
 
 async function main(): Promise<void> {
+  await dbReady(); // settle the first-boot gate before dropping
   const tables = Object.values(schema).filter((x) => is(x, PgTable)).map((x) => getTableName(x));
-  const client = new Client({ connectionString: databaseUrl });
-  await client.connect();
-  await client.query(tables.map((name) => `DROP TABLE IF EXISTS ${name} CASCADE;`).join("\n"));
-  await client.end();
+  for (const name of tables) {
+    await db.execute(sql.raw(`DROP TABLE IF EXISTS "${name}" CASCADE`));
+  }
+  dbResetBootstrap();
   await dbReady(); // bootstrap recreates the schema and auto-seeds the empty DB
   const info = databaseInfo();
   console.log(`Seeded fresh database ${info.database} at ${info.host}:${info.port}`);

@@ -1,0 +1,23 @@
+CAP Trellis
+Copyright 2026 Community Action Lehigh Valley and the CAP Trellis contributors
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this work except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+This product is an open-source client intake, eligibility, case- and
+service-management, and CSBG Annual Report system for Community Action
+Agencies. It is built around the data requirements of the CSBG Annual
+Report 3.0 (OMB No. 0970-0492) and the HHS Federal Poverty Guidelines.
+
+CAP Trellis is not endorsed by or affiliated with the U.S. Department of
+Health and Human Services, the Administration for Children and Families,
+the Office of Community Services, NASCSP, or the National Community
+Action Partnership. CSBG taxonomy labels reproduced in this software are
+drawn from public federal reporting instruments.
+
+Bundled fonts and brand assets under public/brand and src/fonts may be
+subject to their own licenses; deployments replace these with their own
+organization's assets via Settings.

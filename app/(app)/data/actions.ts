@@ -1,9 +1,10 @@
 "use server";
-/* Data & integrations — spreadsheet import. Parse runs server-side (CSV/XLSX via
-   SheetJS); commit re-validates every row against the live tables. Admin-only. */
+/* Data & integrations — spreadsheet import. Parse runs server-side (CSV via the
+   built-in RFC 4180 parser, XLSX via ExcelJS); commit re-validates every row
+   against the live tables. Admin-only. */
 import { revalidatePath } from "next/cache";
 import { and, eq } from "drizzle-orm";
-import * as XLSX from "xlsx";
+import { readSheet } from "@/lib/spreadsheet";
 import { db, t } from "@/db";
 import { requireAdmin } from "@/lib/auth";
 import { audit, getPrograms } from "@/lib/access";
@@ -29,22 +30,13 @@ export async function parseImportFile(filename: string, base64: string): Promise
   if (buf.length === 0) return { ok: false, message: "That file looks empty — pick a CSV or XLSX export." };
   if (buf.length > MAX_FILE_BYTES) return { ok: false, message: "Files up to 4 MB are supported — split larger exports." };
 
-  let wb: XLSX.WorkBook;
-  try {
-    wb = XLSX.read(buf, { type: "buffer" });
-  } catch {
-    return { ok: false, message: `“${filename}” doesn't look like a CSV or XLSX file.` };
+  const sheet = await readSheet(buf);
+  if (!sheet) return { ok: false, message: `“${filename}” doesn't look like a CSV or XLSX file.` };
+
+  const { headers, rows } = sheet;
+  if (headers.length === 0 || rows.length === 0) {
+    return { ok: false, message: "The sheet needs a header row plus at least one data row." };
   }
-  const ws = wb.Sheets[wb.SheetNames[0]];
-  if (!ws) return { ok: false, message: "No worksheet found in that file." };
-
-  // raw:false → formatted text exactly as the sheet displays it (dates stay readable)
-  const grid = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, raw: false, defval: "" })
-    .map((r) => (r as unknown[]).map((c) => String(c ?? "").trim()))
-    .filter((r) => r.some((c) => c !== ""));
-
-  if (grid.length < 2) return { ok: false, message: "The sheet needs a header row plus at least one data row." };
-  const [headers, ...rows] = grid;
   if (rows.length > MAX_ROWS) {
     return { ok: false, message: `That's ${fmt(rows.length)} rows — imports cap at ${fmt(MAX_ROWS)} per file. Split the export.` };
   }

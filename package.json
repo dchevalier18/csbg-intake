@@ -1,32 +1,44 @@
 {
-  "name": "csbg-intake",
-  "version": "0.1.0",
+  "name": "cap-trellis",
+  "version": "0.5.0",
   "private": true,
-  "description": "CSBG Client Intake System — configurable client intake, eligibility, case & service management for Community Action Agencies (CSBG Annual Report 3.0, OMB 0970-0492)",
+  "license": "Apache-2.0",
+  "description": "CAP Trellis — open-source client intake, eligibility, case & service management, and CSBG Annual Report 3.0 (OMB 0970-0492) reporting for Community Action Agencies",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dchevalier18/csbg-intake.git"
+  },
   "scripts": {
     "dev": "next dev -p 3100",
     "build": "next build",
     "start": "next start -p 3100",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "seed": "tsx src/db/seed-cli.ts",
     "smoke": "tsx scripts/smoke-pglite.ts"
   },
+  "overrides": {
+    "postcss": "^8.5.10",
+    "uuid": "^11.1.1"
+  },
   "dependencies": {
-    "drizzle-orm": "^0.44.2",
+    "@electric-sql/pglite": "^0.3.0",
+    "drizzle-orm": "^0.45.2",
+    "exceljs": "^4.4.0",
     "next": "^15.5.4",
     "pg": "^8.21.0",
     "react": "^19.1.0",
-    "react-dom": "^19.1.0",
-    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
+    "react-dom": "^19.1.0"
   },
   "devDependencies": {
-    "@electric-sql/pglite": "^0.3.0",
     "@types/node": "^24.0.0",
     "@types/pg": "^8.20.0",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "tsx": "^4.20.0",
-    "typescript": "^5.8.0"
+    "typescript": "^5.8.0",
+    "vitest": "^3.2.0"
   }
 }
