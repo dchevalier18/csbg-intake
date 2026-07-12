@@ -56,6 +56,11 @@ export const users = pgTable("users", {
   access: text("access").notNull().default("assigned"), // 'all' | 'assigned'
   initials: text("initials").notNull(),
   active: integer("active").notNull().default(1),
+  // TOTP MFA (RFC 6238) — secret is set at enrollment start, enabled only
+  // after the first code verifies; recovery codes are scrypt hashes
+  totpSecret: text("totp_secret"),
+  totpEnabled: integer("totp_enabled").notNull().default(0),
+  recoveryCodes: jsonb("recovery_codes").$type<string[]>().notNull().default([]),
 });
 
 export const userPrograms = pgTable("user_programs", {
@@ -67,6 +72,11 @@ export const sessions = pgTable("sessions", {
   token: text("token").primaryKey(),
   userId: text("user_id").notNull(),
   expiresAt: text("expires_at").notNull(),
+  // MFA-pending sessions: password verified, waiting on the TOTP code —
+  // treated as signed-out everywhere except the /login/mfa step
+  mfaPending: integer("mfa_pending").notNull().default(0),
+  createdAt: text("created_at"),
+  userAgent: text("user_agent"),
 });
 
 // ---------- Programs (configured per agency; type activates tools) ----------
