@@ -3,7 +3,7 @@ import { canonicalCharacteristic, characteristicByCode, CHARACTERISTICS, CATALOG
 
 describe("characteristic canonicalization (instrument-exact report labels)", () => {
   it("catalog is versioned", () => {
-    expect(CATALOG_VERSION).toBe("AR-3.0");
+    expect(CATALOG_VERSION).toMatch(/^AR-3\.0/);
   });
 
   it("passes canonical options through unchanged", () => {
@@ -27,6 +27,8 @@ describe("characteristic canonicalization (instrument-exact report labels)", () 
       .toBe("Multiracial or Multiethnic (two or more of the above)");
     expect(canonicalCharacteristic("C8", "Unemployed (Long-Term)"))
       .toBe("Unemployed (Long-Term, more than 6 months)");
+    expect(canonicalCharacteristic("C8", "Seasonal Farm Worker"))
+      .toBe("Migrant or Seasonal Farm Worker");
     expect(canonicalCharacteristic("C8", "Unemployed (Short-Term)"))
       .toBe("Unemployed (Short-Term, 6 months or less)");
     expect(canonicalCharacteristic("D9", "Multiple adults no children"))

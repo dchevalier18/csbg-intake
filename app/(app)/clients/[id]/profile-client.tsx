@@ -205,7 +205,7 @@ export function ClientProfile({ client, status, programs, completeness, characte
       </div>
 
       <div className="row2">
-        <Panel title="Household & CSBG characteristics" sub="Feeds the All Characteristics Report (Module 4, Section C) — every field here rolls up automatically.">
+        <Panel title="Household & CSBG characteristics" sub="Feeds the All Characteristics Report (Module 3, Section C) — every field here rolls up automatically.">
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "2px 24px" }}>
             {characteristics.map(([k, v]) => (
               <div key={k} style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "8px 0", borderBottom: "1px solid var(--calv-slate-15)", fontSize: 13 }}>
@@ -242,7 +242,7 @@ export function ClientProfile({ client, status, programs, completeness, characte
           </Panel>
           <Panel
             title="Outcomes (FNPI)"
-            sub={outcomes.length + (outcomes.length === 1 ? " indicator" : " indicators") + " recorded this FY — rolls into Module 4, Section B."}
+            sub={outcomes.length + (outcomes.length === 1 ? " indicator" : " indicators") + " recorded this FY — rolls into Module 3, Section B."}
             right={
               <button className="calv-btn calv-btn--primary calv-btn--sm" onClick={() => setShowOutcome(true)}>
                 <I name="plus" size={13} /> Record outcome
@@ -424,7 +424,7 @@ export function ClientProfile({ client, status, programs, completeness, characte
           {svcCode ? (
             <p style={{ fontSize: 12, color: "var(--calv-slate-65)", margin: "12px 0 0" }}>
               Will report as <span className="code-chip">{svcCode}</span> under{" "}
-              <strong style={{ fontWeight: 600 }}>{DOMAINS.find((d) => d.id === serviceOptions.find((s) => s.code === svcCode)?.domain)?.name}</strong> in Module 4, Section A.
+              <strong style={{ fontWeight: 600 }}>{DOMAINS.find((d) => d.id === serviceOptions.find((s) => s.code === svcCode)?.domain)?.name}</strong> in Module 3, Section A.
             </p>
           ) : null}
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 18 }}>
@@ -500,7 +500,7 @@ export function ClientProfile({ client, status, programs, completeness, characte
           </div>
           {fnpiCode ? (
             <p style={{ fontSize: 12, color: "var(--calv-slate-65)", margin: "12px 0 0" }}>
-              Will count under <span className="code-chip">{fnpiCode}</span> in Module 4, Section B — {fnpiStatus === "Achieved" ? "served and achieving the outcome" : "served, with the outcome in progress"}.
+              Will count under <span className="code-chip">{fnpiCode}</span> in Module 3, Section B — {fnpiStatus === "Achieved" ? "served and achieving the outcome" : "served, with the outcome in progress"}.
             </p>
           ) : null}
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 18 }}>

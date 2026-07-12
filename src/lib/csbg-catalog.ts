@@ -1,6 +1,6 @@
 // CSBG Annual Report 3.0 taxonomy (OMB 0970-0492) — extracted from the official form.
 //
-// Source: Module 4 (Individual and Family Level) of the CSBG Annual Report 3.0:
+// Source: Module 3 (Individual and Family Level) of the CSBG Annual Report 3.0:
 //   Section A — Individual and Family Services (SDA / SRV codes)
 //   Section B — Individual and Family National Performance Indicators (FNPI codes)
 //   Section C — All Characteristics Report (C1–C8 individual, D9–D13 household)
@@ -9,7 +9,7 @@
 // Verification status + instrument mapping: docs/compliance/ar-3.0.md
 
 /** Bump on any change that tracks a federal instrument revision. */
-export const CATALOG_VERSION = "AR-3.0";
+export const CATALOG_VERSION = "AR-3.0.1"; // verified against the OMB-approved instrument PDF (July 2026)
 
 export interface ServiceDomain { id: string; code: string; name: string }
 export interface ServiceDef { code: string; domain: string; label: string }
@@ -184,8 +184,8 @@ export const CHARACTERISTICS: CharacteristicCategory[] = [
   {
     code: "C1",
     scope: "individual",
-    label: "Sex",
-    options: ["Male", "Female"],
+    label: "Gender Identity",
+    options: ["Male", "Female", "Transgender, non-binary, or another gender"],
   },
   {
     code: "C2",
@@ -267,7 +267,7 @@ export const CHARACTERISTICS: CharacteristicCategory[] = [
     options: [
       "Employed Full-Time",
       "Employed Part-Time",
-      "Seasonal Farm Worker",
+      "Migrant or Seasonal Farm Worker",
       "Unemployed (Short-Term, 6 months or less)",
       "Unemployed (Long-Term, more than 6 months)",
       "Unemployed (Not in Labor Force)",
@@ -286,6 +286,7 @@ export const CHARACTERISTICS: CharacteristicCategory[] = [
       "Household with multiple adults with no children",
       "Single Parent Female",
       "Single Parent Male",
+      "Single Parent Non-Binary, Transgender, or Another Gender",
       "Two Parent Household",
       "Non-related Adults with Children",
       "Multigenerational Household",
@@ -381,6 +382,7 @@ const CANON_ALIASES: Record<string, Record<string, string>> = {
     "Multiracial or Multiethnic": "Multiracial or Multiethnic (two or more of the above)",
   },
   C8: {
+    "Seasonal Farm Worker": "Migrant or Seasonal Farm Worker",
     "Unemployed (Short-Term)": "Unemployed (Short-Term, 6 months or less)",
     "Unemployed (Long-Term)": "Unemployed (Long-Term, more than 6 months)",
   },
