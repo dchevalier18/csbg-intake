@@ -13,7 +13,7 @@ Works offline after the initial `npm ci`.
 3. In PowerShell, from the repository folder:
 
    ```powershell
-   powershell -ExecutionPolicy Bypass -File deploy\windows\install.ps1
+   deploy\windows\install.cmd
    ```
 
 That builds the app, registers **start-at-sign-in** (a scheduled task, or a
@@ -24,7 +24,7 @@ demo data on this path).
 ## Manage
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File deploy\windows\manage.ps1
+deploy\windows\manage.cmd
 ```
 
 A console menu with the §7.2 manager-panel contract:
