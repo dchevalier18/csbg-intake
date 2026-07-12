@@ -9,14 +9,13 @@ import { requireUser } from "@/lib/auth";
 import { audit, userCanSeeProgram, visibleClient } from "@/lib/access";
 import { serviceAllowedForProgram } from "@/lib/data/core";
 import { currentFY, todayIso } from "@/lib/format";
+import { checkUpload } from "@/lib/uploads";
 
 export interface ServiceEntryResult {
   ok: boolean;
   message: string;
 }
 
-const UPLOAD_EXTENSIONS = [".pdf", ".jpg", ".jpeg", ".png", ".heic", ".tif", ".tiff"];
-const MAX_UPLOAD_BYTES = 4 * 1024 * 1024;
 const UPLOADS_DIR = path.join(process.cwd(), "data", "uploads");
 
 const safeSegment = (s: string) => s.replace(/[^A-Za-z0-9._-]/g, "_");
@@ -65,15 +64,9 @@ export async function addServiceEntry(input: {
   let fileName: string | null = null;
   let filePath: string | null = null;
   if (input.attachment) {
-    const ext = path.extname(input.attachment.name ?? "").toLowerCase();
-    if (!UPLOAD_EXTENSIONS.includes(ext)) {
-      return { ok: false, message: "That file type isn't supported — attach a PDF or a scanned image (JPG, PNG, HEIC, TIFF)." };
-    }
-    const buf = Buffer.from(String(input.attachment.base64 ?? ""), "base64");
-    if (buf.length === 0) return { ok: false, message: "That file looks empty — rescan the document and try again." };
-    if (buf.length > MAX_UPLOAD_BYTES) {
-      return { ok: false, message: "Files up to 4 MB are supported — scan at a lower resolution or split the document." };
-    }
+    const checked = checkUpload(input.attachment.name, input.attachment.base64);
+    if (!checked.ok) return { ok: false, message: checked.message };
+    const { ext, buf } = checked;
     const dir = path.join(UPLOADS_DIR, "service-log", safeSegment(clientId));
     fs.mkdirSync(dir, { recursive: true });
     const storedName = `svc-${Date.now()}${ext}`;

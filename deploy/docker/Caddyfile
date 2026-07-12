@@ -1,0 +1,7 @@
+# Automatic HTTPS for the CAP Trellis app.
+# CSBG_DOMAIN=localhost serves plain http://localhost for trials;
+# a real domain gets Let's Encrypt certificates automatically.
+{$CSBG_DOMAIN} {
+	encode gzip
+	reverse_proxy app:3100
+}

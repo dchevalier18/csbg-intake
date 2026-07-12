@@ -1,0 +1,12 @@
+node_modules
+.next
+.git
+data
+docs
+deploy/examples
+deploy/docker/backups
+*.md
+!README.md
+.env*
+tsconfig.tsbuildinfo
+tests

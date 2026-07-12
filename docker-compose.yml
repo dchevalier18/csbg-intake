@@ -1,0 +1,72 @@
+# CAP Trellis — one-command self-host:
+#   cp .env.example .env   (set CSBG_DOMAIN + DB_PASSWORD)
+#   docker compose up -d
+# Caddy terminates TLS with automatic Let's Encrypt certificates for CSBG_DOMAIN.
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://csbg:${DB_PASSWORD:-csbg}@db:5432/csbg_intake
+    volumes:
+      - app_data:/app/data
+    depends_on:
+      db:
+        condition: service_healthy
+    expose:
+      - "3100"
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: csbg
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-csbg}
+      POSTGRES_DB: csbg_intake
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      - ./deploy/docker/backups:/backups
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U csbg -d csbg_intake"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      CSBG_DOMAIN: ${CSBG_DOMAIN:-localhost}
+    volumes:
+      - ./deploy/docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+
+  # nightly logical backup of the database into ./deploy/docker/backups
+  backup:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      PGPASSWORD: ${DB_PASSWORD:-csbg}
+    volumes:
+      - ./deploy/docker/backups:/backups
+    entrypoint: >
+      /bin/sh -c 'while true; do
+        pg_dump -h db -U csbg -d csbg_intake -F c -f "/backups/csbg-$$(date +%Y%m%d-%H%M%S).dump" &&
+        ls -1t /backups/csbg-*.dump 2>/dev/null | tail -n +31 | xargs -r rm --;
+        sleep 86400;
+      done'
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  app_data:
+  db_data:
+  caddy_data:
+  caddy_config:
