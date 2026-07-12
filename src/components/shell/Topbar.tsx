@@ -76,6 +76,10 @@ export function Topbar({ user, fyLabel, onSignOut }: {
           {menuOpen ? (
             <div className="user-menu">
               <div className="user-menu-head">Signed in as {user.name}</div>
+              <button type="button" onClick={() => { setMenuOpen(false); router.push("/security"); }}>
+                <I name="shield" size={15} style={{ color: "var(--calv-slate-65)" }} />
+                <span style={{ flex: 1, textAlign: "left" }}>Security<span style={{ color: "var(--calv-slate-65)", display: "block", fontSize: 11 }}>Two-step verification & signed-in devices</span></span>
+              </button>
               <button type="button" onClick={() => { setMenuOpen(false); void onSignOut(); }}>
                 <I name="logout" size={15} style={{ color: "var(--calv-slate-65)" }} />
                 <span style={{ flex: 1, textAlign: "left" }}>Sign out<span style={{ color: "var(--calv-slate-65)", display: "block", fontSize: 11 }}>Switch users from the sign-in screen</span></span>

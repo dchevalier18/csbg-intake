@@ -6,6 +6,16 @@ tracks a federal instrument or guideline revision) are marked **[compliance]**
 
 ## Unreleased — 0.5.0 (roadmap Phases 1–5)
 
+### Security: two-step verification + device management (deferred item)
+- TOTP MFA (RFC 6238, no new dependencies): per-account enrollment with
+  manual-entry key + otpauth link, 8 single-use recovery codes (hashed at
+  rest, shown once), two-step sign-in with short-lived pending sessions and
+  token rotation, rate-limited verification, operator lockout reset
+  (`npm run mfa:reset -- <username>`, audited, revokes all sessions)
+- /security page for every staff account: manage two-step verification and
+  see/revoke signed-in devices (created, browser/OS, expiry) + sign out
+  everywhere else; raw session tokens never reach the client (fingerprints)
+
 ### Instrument verification (post-Phase 5)
 - **[compliance]** Verified the catalog against the OMB-approved Annual Report
   3.0 instrument PDF (`CATALOG_VERSION` → `AR-3.0.1`):

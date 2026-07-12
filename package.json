@@ -3,7 +3,7 @@
   "version": "0.5.0",
   "private": true,
   "license": "Apache-2.0",
-  "description": "CAP Trellis — open-source client intake, eligibility, case & service management, and CSBG Annual Report 3.0 (OMB 0970-0492) reporting for Community Action Agencies",
+  "description": "CAP Trellis \u2014 open-source client intake, eligibility, case & service management, and CSBG Annual Report 3.0 (OMB 0970-0492) reporting for Community Action Agencies",
   "repository": {
     "type": "git",
     "url": "https://github.com/dchevalier18/csbg-intake.git"
@@ -17,7 +17,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "seed": "tsx src/db/seed-cli.ts",
-    "smoke": "tsx scripts/smoke-pglite.ts"
+    "smoke": "tsx scripts/smoke-pglite.ts",
+    "mfa:reset": "tsx scripts/mfa-reset.ts"
   },
   "overrides": {
     "postcss": "^8.5.10",
