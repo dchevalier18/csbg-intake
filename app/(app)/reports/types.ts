@@ -44,6 +44,17 @@ export interface FnpiRow {
   actual: number;
 }
 
+/** ROMA agency goal + the FNPI indicators that measure it (Org Standard 4.3). */
+export interface RomaGoalRow {
+  id: number;
+  title: string;
+  description: string;
+  indicators: FnpiRow[];
+  served: number;
+  target: number;
+  actual: number;
+}
+
 export interface ReportRollup {
   fy: { label: string; short: string; range: string; pctElapsed: number };
   orgName: string;
@@ -55,6 +66,7 @@ export interface ReportRollup {
       more characteristics were obtained (live records; kv baselines excluded). */
   sectionCTotals: { individuals: number; households: number };
   dataQuality: DriftEntry[];
+  roma: RomaGoalRow[];
   characteristics: MiniTableData[];
   srvByDomain: DomainBar[];
   topServices: TopService[];

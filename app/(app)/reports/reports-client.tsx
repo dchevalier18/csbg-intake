@@ -8,6 +8,7 @@ import { useToast } from "@/components/toast";
 import { I } from "@/components/icons";
 import { fmt } from "@/lib/format";
 import { fnpiStats, type MiniTableData, type ReportRollup } from "./types";
+import { addRomaGoal, removeRomaGoal } from "./actions";
 
 function MiniTable({ title, code, rows, total }: MiniTableData) {
   const max = Math.max(1, ...rows.map((r) => r.n));
@@ -36,9 +37,26 @@ function MiniTable({ title, code, rows, total }: MiniTableData) {
   );
 }
 
-export function ReportsClient({ data }: { data: ReportRollup }) {
+export function ReportsClient({ data, canManageGoals, fnpiOptions }: {
+  data: ReportRollup;
+  canManageGoals: boolean;
+  fnpiOptions: Array<{ code: string; label: string }>;
+}) {
   const toast = useToast();
   const [tab, setTab] = useState("Characteristics");
+  const [goalTitle, setGoalTitle] = useState("");
+  const [goalDesc, setGoalDesc] = useState("");
+  const [goalCodes, setGoalCodes] = useState<string[]>([]);
+
+  async function onAddGoal() {
+    const res = await addRomaGoal(goalTitle, goalDesc, goalCodes);
+    toast(res.message);
+    if (res.ok) { setGoalTitle(""); setGoalDesc(""); setGoalCodes([]); }
+  }
+  async function onRemoveGoal(id: number) {
+    const res = await removeRomaGoal(id);
+    toast(res.message);
+  }
   const { fy, agency, clientCount: n, readyPct } = data;
   const maxSrv = Math.max(1, ...data.srvByDomain.map((d) => d.count));
 
@@ -62,6 +80,10 @@ export function ReportsClient({ data }: { data: ReportRollup }) {
           <div style={{ display: "flex", gap: 8 }}>
             <button className="calv-btn calv-btn--quiet calv-btn--sm"
               onClick={() => download("/reports/export", "CSV export generated.")}>Export CSV</button>
+            <button className="calv-btn calv-btn--quiet calv-btn--sm"
+              onClick={() => download("/reports/export?xlsx=1", "Module 4 workbook exported — Sections A, B & C plus the validation sheet.")}>
+              Module 4 workbook (Excel)
+            </button>
             <button className="calv-btn calv-btn--primary calv-btn--sm"
               onClick={() => download("/reports/export?packet=1", "Annual Report packet drafted — Module 4 Sections A, B & C.")}>
               <I name="doc" size={13} /> Draft Annual Report
@@ -78,10 +100,12 @@ export function ReportsClient({ data }: { data: ReportRollup }) {
       </div>
 
       <div className="toolbar">
-        <Seg options={["Characteristics", "Services", "Outcomes (FNPI)"]} value={tab} onChange={setTab} />
+        <Seg options={["Characteristics", "Services", "Outcomes (FNPI)", "ROMA goals"]} value={tab} onChange={setTab} />
         <span className="kbd-hint" style={{ marginLeft: "auto" }}>
           {tab === "Characteristics" ? "Sec. C — tallied live from the " + n + " records in this system" :
-            tab === "Services" ? "Sec. A — unduplicated counts by service code" : "Sec. B — Individual & Family National Performance Indicators"}
+            tab === "Services" ? "Sec. A — unduplicated counts by service code" :
+              tab === "Outcomes (FNPI)" ? "Sec. B — Individual & Family National Performance Indicators" :
+                "Org Standard 4.3 — agency goals traced to the indicators that measure them"}
         </span>
       </div>
 
@@ -165,6 +189,66 @@ export function ReportsClient({ data }: { data: ReportRollup }) {
           <p style={{ fontSize: 12, color: "var(--calv-slate-65)", marginTop: 14 }}>
             {fy.pctElapsed}% of the FY has elapsed — indicators under {fy.pctElapsed - 5}% of target are flagged so program managers can act before September 30, not after.
           </p>
+        </Panel>
+      ) : null}
+
+      {tab === "ROMA goals" ? (
+        <Panel title="ROMA — agency goals and the indicators that measure them"
+          sub="Board-ready evidence for Organizational Standard 4.3: each goal traces to FNPI indicators, whose live counts roll up here.">
+          {canManageGoals ? (
+            <div style={{ margin: "4px 0 18px", padding: "14px 16px", background: "var(--calv-sand-15)", border: "1px solid var(--calv-sand-35)", borderRadius: 4 }}>
+              <div className="calv-label" style={{ marginBottom: 10 }}>Add a goal</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1.4fr", gap: 12 }}>
+                <div className="field"><label>Goal title</label>
+                  <input value={goalTitle} onChange={(e) => setGoalTitle(e.target.value)} placeholder="e.g. Households achieve stable housing" /></div>
+                <div className="field"><label>Description (optional)</label>
+                  <input value={goalDesc} onChange={(e) => setGoalDesc(e.target.value)} placeholder="From the community action plan" /></div>
+              </div>
+              <div className="field" style={{ marginTop: 10 }}>
+                <label>Linked FNPI indicators (choose one or more)</label>
+                <select multiple size={6} value={goalCodes}
+                  onChange={(e) => setGoalCodes([...e.target.selectedOptions].map((o) => o.value))}>
+                  {fnpiOptions.map((f) => <option key={f.code} value={f.code}>{f.code} — {f.label}</option>)}
+                </select>
+              </div>
+              <button className="calv-btn calv-btn--primary calv-btn--sm" style={{ marginTop: 10 }} onClick={onAddGoal}>
+                <I name="plus" size={13} /> Add goal
+              </button>
+            </div>
+          ) : null}
+          {data.roma.length === 0 ? (
+            <div className="empty" style={{ padding: 20 }}>
+              No goals yet — link your community action plan goals to FNPI indicators
+              {canManageGoals ? " with the form above" : " (a Program Manager or Data Admin adds them)"}.
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              {data.roma.map((g) => {
+                const pct = g.target > 0 ? Math.min(100, Math.round((g.actual / g.target) * 100)) : 0;
+                return (
+                  <div key={g.id} style={{ border: "1px solid var(--calv-slate-15)", borderRadius: 4, padding: "14px 16px" }}>
+                    <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+                      <strong style={{ fontWeight: 600, fontSize: 14 }}>{g.title}</strong>
+                      <span style={{ fontSize: 12, color: "var(--calv-slate-65)" }}>
+                        {g.indicators.map((i) => i.code).join(" · ")}
+                      </span>
+                      {canManageGoals ? (
+                        <button className="calv-btn calv-btn--quiet calv-btn--sm" style={{ marginLeft: "auto" }} onClick={() => onRemoveGoal(g.id)}>Remove</button>
+                      ) : null}
+                    </div>
+                    {g.description ? <p style={{ fontSize: 12.5, color: "var(--calv-slate-65)", margin: "6px 0 0" }}>{g.description}</p> : null}
+                    <div style={{ display: "flex", gap: 18, marginTop: 10, alignItems: "center", flexWrap: "wrap" }}>
+                      <span style={{ fontSize: 12.5 }}>Served <strong style={{ fontWeight: 700 }}>{fmt(g.served)}</strong></span>
+                      <span style={{ fontSize: 12.5 }}>Target <strong style={{ fontWeight: 700 }}>{fmt(g.target)}</strong></span>
+                      <span style={{ fontSize: 12.5 }}>Achieved <strong style={{ fontWeight: 700 }}>{fmt(g.actual)}</strong></span>
+                      <div className="track" style={{ height: 14, flex: 1, minWidth: 160 }}><i style={{ width: pct + "%" }}></i></div>
+                      <span style={{ fontSize: 12.5, fontWeight: 600 }}>{g.target > 0 ? pct + "% of target" : "no target set"}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </Panel>
       ) : null}
     </div>

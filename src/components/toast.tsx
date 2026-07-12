@@ -21,8 +21,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     <ToastContext.Provider value={toast}>
       {children}
       {msg ? (
-        <div className="toast">
-          <span className="ok"><I name="check" size={15} /></span>
+        <div className="toast" role="status" aria-live="polite">
+          <span className="ok" aria-hidden="true"><I name="check" size={15} /></span>
           {msg}
         </div>
       ) : null}

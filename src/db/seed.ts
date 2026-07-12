@@ -34,6 +34,7 @@ export async function runSeed(db: DB): Promise<void> {
     logoMode: "calv",
     fyStart: "October",
     csbgCeiling: 125,
+    contactLine: "(610) 691-5620 · Mon–Fri 8:30–4:30",
   });
 
   // ---------- FPL guideline history (versioned; 2026 active) ----------

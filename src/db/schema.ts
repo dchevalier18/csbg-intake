@@ -19,6 +19,7 @@ export const organization = pgTable("organization", {
   csbgCeiling: integer("csbg_ceiling").notNull().default(125), // % of FPL
   jurisdiction: text("jurisdiction").notNull().default("contiguous48"), // FPL table: 'contiguous48' | 'alaska' | 'hawaii'
   incomeLookbackDays: integer("income_lookback_days").notNull().default(90), // state income-documentation policy
+  contactLine: text("contact_line").notNull().default(""), // phone + hours shown on the client portal
 });
 
 /* Structured income worksheet — entries annualize into the single `income`
@@ -264,6 +265,17 @@ export const fnpiProgress = pgTable("fnpi_progress", {
   served: integer("served").notNull().default(0),
   target: integer("target").notNull().default(0),
   actual: integer("actual").notNull().default(0),
+});
+
+// ROMA agency goals (Org Standard 4.3 evidence): each goal links to the FNPI
+// indicators that measure it, so assessment → plan → results stays traceable.
+export const romaGoals = pgTable("roma_goals", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  title: text("title").notNull(),
+  description: text("description").notNull().default(""),
+  fnpiCodes: jsonb("fnpi_codes").$type<string[]>().notNull().default([]),
+  sort: integer("sort").notNull().default(0),
+  createdAt: text("created_at").notNull(),
 });
 
 // Client-level outcome recording — one row per client × indicator × FY
