@@ -4,6 +4,7 @@ import { PGlite } from "@electric-sql/pglite";
 import { drizzle as drizzlePglite } from "drizzle-orm/pglite";
 import * as schema from "./schema";
 import { runSeed } from "./seed";
+import { runInit } from "./init";
 import { BOOTSTRAP } from "./ddl";
 
 /* ============================================================
@@ -62,6 +63,12 @@ interface Conn {
    with an advisory lock. Queries through the exported `db` wait on this. */
 const BOOT_LOCK = 727274001;
 
+/* Empty-database initialization: the demo dataset by default (evaluation,
+   `npm run dev`), or the minimal production init (canonical taxonomy, no
+   users → /setup wizard) when CSBG_DEMO_SEED=0. Docker compose ships with
+   CSBG_DEMO_SEED=0 so real installs start clean. */
+const wantDemoSeed = () => process.env.CSBG_DEMO_SEED !== "0";
+
 async function bootstrapPg(): Promise<void> {
   const client = new Client({ connectionString: DATABASE_URL });
   await client.connect();
@@ -70,8 +77,11 @@ async function bootstrapPg(): Promise<void> {
     try {
       await client.query(BOOTSTRAP);
       const r = await client.query("SELECT COUNT(*)::int AS n FROM organization");
-      // auto-seed an empty database so `npm run dev` works out of the box
-      if (r.rows[0].n === 0) await runSeed(drizzle(client, { schema }));
+      if (r.rows[0].n === 0) {
+        const db = drizzle(client, { schema });
+        if (wantDemoSeed()) await runSeed(db);
+        else await runInit(db);
+      }
     } finally {
       await client.query(`SELECT pg_advisory_unlock(${BOOT_LOCK})`);
     }
@@ -116,7 +126,9 @@ function createPgliteConn(): Conn {
     await client.exec(BOOTSTRAP);
     const r = await client.query<{ n: number }>("SELECT COUNT(*)::int AS n FROM organization");
     if (r.rows[0].n === 0) {
-      await runSeed(drizzlePglite(client, { schema }) as unknown as DB);
+      const db = drizzlePglite(client, { schema }) as unknown as DB;
+      if (wantDemoSeed()) await runSeed(db);
+      else await runInit(db);
     }
   };
   const ensureBoot = () => (conn.booted ??= boot());

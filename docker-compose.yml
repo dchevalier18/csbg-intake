@@ -8,6 +8,8 @@ services:
     restart: unless-stopped
     environment:
       DATABASE_URL: postgres://csbg:${DB_PASSWORD:-csbg}@db:5432/csbg_intake
+      # real installs start clean and run the /setup wizard; set to 1 for a demo dataset
+      CSBG_DEMO_SEED: ${CSBG_DEMO_SEED:-0}
     volumes:
       - app_data:/app/data
     depends_on:
