@@ -6,6 +6,15 @@ tracks a federal instrument or guideline revision) are marked **[compliance]**
 
 ## Unreleased — 0.5.0 (roadmap Phases 1–5)
 
+### Spanish (staff app) — foundation + first screens (deferred item)
+- Per-user UI language (English / Español) with a toggle in the user menu;
+  LangProvider lifts the portal's colocated EN/ES dictionary pattern app-wide
+- Translated: sidebar, top bar (search, user menu), and the full intake
+  wizard (all six steps, worksheet, FPL panel, duplicate warnings, review)
+- Note: characteristic question labels come from Settings → Forms (data, not
+  code) — agencies can bilingualize those directly; translations pending a
+  native-speaker review pass
+
 ### Security: two-step verification + device management (deferred item)
 - TOTP MFA (RFC 6238, no new dependencies): per-account enrollment with
   manual-entry key + otpauth link, 8 single-use recovery codes (hashed at
