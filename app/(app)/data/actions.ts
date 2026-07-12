@@ -8,6 +8,7 @@ import { readSheet } from "@/lib/spreadsheet";
 import { db, t } from "@/db";
 import { requireAdmin } from "@/lib/auth";
 import { audit, getPrograms } from "@/lib/access";
+import { programType } from "@/lib/program-types";
 import { kvGet, kvSet, nextClientId } from "@/lib/data/core";
 import { importTemplate } from "@/lib/import-templates";
 import { getActiveFpl } from "@/lib/fpl";
@@ -195,6 +196,55 @@ export async function commitImport(
       seen.add(key);
       imported++;
     }
+  } else if (tpl.id === "pantry-agencies") {
+    // ---- member-agency roster (Primarius 2.0 agency export or any list) ----
+    const programs = await getPrograms();
+    const owning = programs.find((p) => (programType(p.type).caps as string[]).includes("pantry"));
+    if (!owning) return fail("Add a Food Bank / Pantry program first — the roster needs a program to belong to.");
+    const agencies = await db.select().from(t.pantryAgencies);
+    const byId = new Map(agencies.map((a) => [a.id.toLowerCase(), a]));
+    const byName = new Map(agencies.map((a) => [a.name.trim().toLowerCase(), a]));
+    let nextNo = agencies.reduce((m, a) => {
+      const n = Number(a.id.replace("P-", ""));
+      return Number.isFinite(n) && n > m ? n : m;
+    }, 0);
+
+    for (const [i, row] of rows.entries()) {
+      const rowNo = i + 2;
+      const name = cell(row, "name");
+      if (!name) { skip(rowNo, "missing agency name"); continue; }
+      const ref = cell(row, "id");
+      const existing = (ref && byId.get(ref.toLowerCase())) || byName.get(name.toLowerCase());
+      const fields = {
+        name,
+        town: cell(row, "town"),
+        county: cell(row, "county"),
+        contact: cell(row, "contact"),
+        phone: cell(row, "phone"),
+      };
+      if (existing) {
+        // refresh: non-empty cells win, blank cells keep what's on file
+        await db.update(t.pantryAgencies).set({
+          name: fields.name,
+          town: fields.town || existing.town,
+          county: fields.county || existing.county,
+          contact: fields.contact || existing.contact,
+          phone: fields.phone || existing.phone,
+        }).where(eq(t.pantryAgencies.id, existing.id));
+        byName.delete(existing.name.trim().toLowerCase());
+        const refreshed = { ...existing, ...fields };
+        byName.set(name.toLowerCase(), refreshed);
+        byId.set(existing.id.toLowerCase(), refreshed);
+        updated++;
+      } else {
+        const id = "P-" + String(++nextNo).padStart(3, "0");
+        const created = { id, programId: owning.id, ...fields, compliance: "current" };
+        await db.insert(t.pantryAgencies).values(created);
+        byId.set(id.toLowerCase(), created);
+        byName.set(name.toLowerCase(), created);
+        imported++;
+      }
+    }
   } else if (tpl.id === "pantry") {
     const agencies = await db.select().from(t.pantryAgencies);
     const byRef = new Map<string, (typeof agencies)[number]>();
@@ -286,7 +336,7 @@ export async function commitImport(
         "matching", { auto: 0, staff: 0, awaiting: 0, silent: 0 });
       await kvSet("matching", { ...m, auto: m.auto + autoMatched });
     }
-  } else {
+  } else if (tpl.id === "volunteers") {
     // volunteers — hours accumulate on existing rows; new volunteers need a program
     const vols = await db.select().from(t.volunteers);
     const byName = new Map(vols.map((v) => [v.name.toLowerCase(), v]));
@@ -347,6 +397,8 @@ export async function commitImport(
       }
     }
     await kvSet("volStats", stats);
+  } else {
+    return fail(`No importer handles the “${tpl.name}” template yet.`);
   }
 
   const skipped = errors.length;

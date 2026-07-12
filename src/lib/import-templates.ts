@@ -15,7 +15,7 @@ export interface ImportField {
 }
 
 export interface ImportTemplate {
-  id: "pantry" | "seminars" | "volunteers" | "clients";
+  id: "pantry" | "pantry-agencies" | "seminars" | "volunteers" | "clients";
   name: string;
   blurb: string;         // template-picker card copy
   target: string;        // where the rows land, for the result message
@@ -55,6 +55,26 @@ export const IMPORT_TEMPLATES: ImportTemplate[] = [
         aliases: ["housing", "housing status", "housing situation", "tenure"] },
       { key: "hhType", label: "Household type (D9)", required: false, hint: "Instrument answer or close variant",
         aliases: ["hh type", "hhtype", "household type", "family type"] },
+    ],
+  },
+  {
+    id: "pantry-agencies",
+    name: "Pantry member agencies",
+    blurb: "Member-agency roster — build or refresh the pantry network from Primarius 2.0's agency export or any agency list.",
+    target: "the pantry network roster",
+    fields: [
+      { key: "id", label: "Agency ID", required: false, hint: "Existing ID (P-014) or Primarius agency ref — matched before name",
+        aliases: ["id", "agency id", "agency ref", "agency #", "agency number", "acct #", "account number", "account #", "ref"] },
+      { key: "name", label: "Agency name", required: true, hint: "Matched against existing agencies to update instead of duplicate",
+        aliases: ["name", "agency", "agency name", "account name", "organization", "member agency", "site"] },
+      { key: "town", label: "Town", required: false, hint: "",
+        aliases: ["town", "city", "municipality"] },
+      { key: "county", label: "County", required: false, hint: "",
+        aliases: ["county", "county name"] },
+      { key: "contact", label: "Contact", required: false, hint: "",
+        aliases: ["contact", "contact name", "primary contact", "coordinator", "director"] },
+      { key: "phone", label: "Phone", required: false, hint: "",
+        aliases: ["phone", "phone number", "telephone", "contact phone"] },
     ],
   },
   {
