@@ -158,6 +158,16 @@ project rather than a repo.
 
 ## 4. Core data requirements (the spec)
 
+> **Correction (July 2026, post-implementation):** verification against the
+> OMB-approved 3.0 instrument PDF showed the Individual & Family Level is
+> **Module 3** in 3.0 (Community Level is Module 4), and Section C's final
+> wording differs in places from the 2.1-baseline tables below (C1 "Gender
+> Identity" incl. a transgender/non-binary option; C8 "Migrant or Seasonal
+> Farm Worker"; D9 incl. a single-parent non-binary row; D12 top bands
+> 201–250% / 251%+). `docs/compliance/ar-3.0.md` is the authoritative,
+> instrument-verified record — this section is preserved as the planning
+> baseline.
+
 ### 4.1 CSBG Annual Report 3.0 — status and structure
 
 - OMB No. **0970-0492**, Annual Report **3.0** approved **Dec 17, 2024**, expires

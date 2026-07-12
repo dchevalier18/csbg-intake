@@ -32,7 +32,9 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
-  output: "standalone",
+  // standalone output only for container builds (Dockerfile sets BUILD_STANDALONE=1);
+  // the Windows local tier runs `next start`, which standalone builds don't support
+  output: process.env.BUILD_STANDALONE === "1" ? "standalone" : undefined,
   serverExternalPackages: ["pg", "@electric-sql/pglite"],
   experimental: {
     serverActions: {

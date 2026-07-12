@@ -7,9 +7,9 @@ import { buildRollup } from "../rollup";
 import { fnpiStats, type ReportRollup } from "../types";
 
 /* ============================================================
-   GET /reports/export          → CSV rollup (Module 4 A/B/C)
+   GET /reports/export          → CSV rollup (Module 3 A/B/C)
    GET /reports/export?packet=1 → Draft Annual Report packet (Markdown)
-   GET /reports/export?xlsx=1   → Module 4 workbook (Excel), shaped like the
+   GET /reports/export?xlsx=1   → Module 3 workbook (Excel), shaped like the
                                   OCS SmartForm sections for transcription
                                   into the state submission
    All stream real files generated from live data.
@@ -33,7 +33,7 @@ function buildCsv(d: ReportRollup): string {
   L.push(row("Records report-ready", d.readyPct + "%"));
   L.push("");
 
-  L.push(row("MODULE 4 SEC. C — SUMMARY"));
+  L.push(row("MODULE 3 SEC. C — SUMMARY"));
   L.push(row("Line", "Measure", "Value"));
   L.push(row("A", "Individuals served (unduplicated)", d.agency.individualsServed));
   L.push(row("B", "Households served (unduplicated)", d.agency.householdsServed));
@@ -53,7 +53,7 @@ function buildCsv(d: ReportRollup): string {
     L.push("");
   }
 
-  L.push(row("MODULE 4 SEC. C — ALL CHARACTERISTICS REPORT"));
+  L.push(row("MODULE 3 SEC. C — ALL CHARACTERISTICS REPORT"));
   for (const m of d.characteristics) {
     L.push(row(m.code, m.title));
     L.push(row("Answer", "Count"));
@@ -62,7 +62,7 @@ function buildCsv(d: ReportRollup): string {
     L.push("");
   }
 
-  L.push(row("MODULE 4 SEC. A — SERVICES BY DOMAIN"));
+  L.push(row("MODULE 3 SEC. A — SERVICES BY DOMAIN"));
   L.push(row("Code", "Domain", "Individuals served"));
   for (const s of d.srvByDomain) L.push(row(s.code, s.name, s.count));
   L.push("");
@@ -71,7 +71,7 @@ function buildCsv(d: ReportRollup): string {
   for (const s of d.topServices) L.push(row(s.code, s.label, s.count));
   L.push("");
 
-  L.push(row("MODULE 4 SEC. B — INDIVIDUAL & FAMILY NPIs"));
+  L.push(row("MODULE 3 SEC. B — INDIVIDUAL & FAMILY NPIs"));
   L.push(row("Code", "Indicator", "Served", "Target", "Actual", "% achieving", "Target accuracy", "Pace"));
   for (const f of d.fnpi) {
     const s = fnpiStats(f, d.fy.pctElapsed);
@@ -89,14 +89,14 @@ function buildPacket(d: ReportRollup): string {
   const out: string[] = [];
   out.push(`# CSBG Annual Report 3.0 — ${d.fy.short} Draft`);
   out.push("");
-  out.push(`**OMB 0970-0492 · Module 4 Sections A, B & C** — drafted ${d.generated} from live records.`);
+  out.push(`**OMB 0970-0492 · Module 3 Sections A, B & C** — drafted ${d.generated} from live records.`);
   out.push("");
   out.push(`- Agency: ${d.orgName}`);
   out.push(`- Fiscal year: ${d.fy.label} (${d.fy.range}) — ${d.fy.pctElapsed}% elapsed`);
   out.push(`- Records report-ready: ${d.readyPct}% (${100 - d.readyPct}% have Unknown / Not Reported fields)`);
   out.push("");
 
-  out.push("## Module 4, Section C — Summary");
+  out.push("## Module 3, Section C — Summary");
   out.push("");
   out.push("| Line | Measure | Value |");
   out.push("| --- | --- | ---: |");
@@ -118,7 +118,7 @@ function buildPacket(d: ReportRollup): string {
     out.push("");
   }
 
-  out.push("## Module 4, Section A — Services by domain");
+  out.push("## Module 3, Section A — Services by domain");
   out.push("");
   out.push(`Unduplicated individuals served, ${d.fy.short} to date.`);
   out.push("");
@@ -129,7 +129,7 @@ function buildPacket(d: ReportRollup): string {
   out.push(`Top single services: ${d.topServices.map((s) => `${s.code} ${s.label} (${fmt(s.count)})`).join(" · ")}.`);
   out.push("");
 
-  out.push("## Module 4, Section B — Individual & Family NPIs");
+  out.push("## Module 3, Section B — Individual & Family NPIs");
   out.push("");
   out.push(`Actuals vs ${d.fy.short} targets. 'Achieving outcome' = actual ÷ number served; 'target accuracy' = actual ÷ target.`);
   out.push("");
@@ -143,7 +143,7 @@ function buildPacket(d: ReportRollup): string {
   out.push(`${d.fy.pctElapsed}% of the FY has elapsed — indicators under ${d.fy.pctElapsed - 5}% of target are flagged so program managers can act before September 30, not after.`);
   out.push("");
 
-  out.push("## Module 4, Section C — All Characteristics Report");
+  out.push("## Module 3, Section C — All Characteristics Report");
   out.push("");
   out.push(`Tallied live from the ${d.clientCount} enrolled client records. Blank answers report as "Unknown / Not Reported."`);
   for (const m of d.characteristics) {
@@ -159,7 +159,7 @@ function buildPacket(d: ReportRollup): string {
   return out.join("\n");
 }
 
-// ---------- Module 4 workbook (SmartForm-shaped Excel) ----------
+// ---------- Module 3 workbook (SmartForm-shaped Excel) ----------
 /* The OCS submission pipeline (OLDC) rejects control characters and chokes on
    markup-significant text in SmartForm cells — scrub every string we emit. */
 const cleanCell = (s: string): string =>
@@ -174,14 +174,14 @@ async function buildXlsx(d: ReportRollup): Promise<Buffer> {
   const cover = wb.addWorksheet("Cover");
   cover.columns = [{ width: 34 }, { width: 60 }];
   cover.addRows([
-    ["CSBG Annual Report 3.0 — Module 4", ""],
+    ["CSBG Annual Report 3.0 — Module 3", ""],
     ["OMB No.", "0970-0492"],
     ["Catalog version", CATALOG_VERSION],
     ["Agency", cleanCell(d.orgName)],
     ["Reporting period", `${d.fy.label} (${d.fy.range})`],
     ["Generated", d.generated],
     ["", ""],
-    ["How to use this workbook", "Values are shaped to the Module 4 sections for transcription into your state's SmartForm/portal. Every characteristic block totals back to its reportable universe, Unknown/Not Reported included."],
+    ["How to use this workbook", "Values are shaped to the Module 3 sections for transcription into your state's SmartForm/portal. Every characteristic block totals back to its reportable universe, Unknown/Not Reported included."],
   ]);
   cover.getColumn(1).font = bold;
 
@@ -240,7 +240,7 @@ export async function GET(req: Request): Promise<Response> {
   if (xlsx) {
     const body = await buildXlsx(d);
     await audit(user.id, "report.xlsx", "report", d.fy.short,
-      "Module 4 workbook exported (SmartForm-shaped Excel, Sections A, B & C + validation)");
+      "Module 3 workbook exported (SmartForm-shaped Excel, Sections A, B & C + validation)");
     return new Response(new Uint8Array(body), {
       headers: {
         "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -259,8 +259,8 @@ export async function GET(req: Request): Promise<Response> {
     "report",
     d.fy.short,
     packet
-      ? "Annual Report packet drafted — Module 4 Sections A, B & C"
-      : "CSV rollup exported (Module 4 Sections A, B & C)",
+      ? "Annual Report packet drafted — Module 3 Sections A, B & C"
+      : "CSV rollup exported (Module 3 Sections A, B & C)",
   );
 
   return new Response(body, {
