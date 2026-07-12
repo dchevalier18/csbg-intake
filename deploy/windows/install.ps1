@@ -44,10 +44,13 @@ Write-Host "    Node $(node --version) OK"
 
 # --- 2. Environment file (embedded DB, production init => /setup wizard) ---
 Step "Writing .env.local (embedded database, setup wizard on first visit)"
+# absolute forward-slash path: independent of the working directory the
+# autostart task launches with, and unambiguous inside the WASM filesystem
+$DataUrl = "pglite://" + ($Root.Path -replace "\\", "/") + "/data/pglite"
 if (-not (Test-Path ".env.local")) {
   @"
 # CAP Trellis — local Windows install (managed by deploy\windows)
-DATABASE_URL=pglite://./data/pglite
+DATABASE_URL=$DataUrl
 CSBG_DEMO_SEED=0
 PORT=$Port
 # LAN access is off by default — use manage.ps1 to turn it on
@@ -107,21 +110,38 @@ if ($autostart -eq "task") {
   Start-Process powershell -ArgumentList "-WindowStyle","Hidden","-ExecutionPolicy","Bypass","-File",$runner -WindowStyle Hidden
 }
 
-$up = $false
+# a response of ANY status means the server process is up; 200 means healthy
+$state = "down"
 $deadline = (Get-Date).AddSeconds(90)
 while ((Get-Date) -lt $deadline) {
   try {
     $r = Invoke-WebRequest -Uri "http://localhost:$Port/login" -UseBasicParsing -TimeoutSec 3
-    if ($r.StatusCode -eq 200) { $up = $true; break }
-  } catch { Start-Sleep -Seconds 2 }
+    if ($r.StatusCode -eq 200) { $state = "healthy"; break }
+    $state = "erroring"; break
+  } catch {
+    if ($_.Exception.Response) { $state = "erroring"; break }
+    Start-Sleep -Seconds 2
+  }
 }
 
-if (-not $up) {
-  Fail "the server did not answer on http://localhost:$Port within 90 seconds. Check data\server.log for details, then try: powershell -File deploy\windows\manage.ps1"
+if ($state -ne "healthy") {
+  Write-Host ""
+  if ($state -eq "erroring") {
+    Write-Host "The server is RUNNING but pages are erroring (usually the embedded database)." -ForegroundColor Yellow
+  } else {
+    Write-Host "The server did not answer on http://localhost:$Port within 90 seconds." -ForegroundColor Yellow
+  }
+  if (Test-Path "data\server.log") {
+    Write-Host "---- last 40 lines of data\server.log ----" -ForegroundColor Yellow
+    Get-Content "data\server.log" -Tail 40
+    Write-Host "---- end of log ----" -ForegroundColor Yellow
+    Write-Host "Send those lines to whoever is helping you debug."
+  }
+  Fail "see the log excerpt above (full log: data\server.log). Manage with: deploy\windows\manage.cmd"
 }
 
 Write-Host ""
 Write-Host "$AppName is installed and running." -ForegroundColor Green
 Write-Host "Opening http://localhost:$Port - the /setup wizard creates your agency and first administrator."
-Write-Host "Day-to-day management: powershell -File deploy\windows\manage.ps1"
+Write-Host "Day-to-day management: deploy\windows\manage.cmd"
 Start-Process "http://localhost:$Port"
