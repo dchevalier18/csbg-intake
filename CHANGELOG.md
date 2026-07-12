@@ -6,6 +6,47 @@ tracks a federal instrument or guideline revision) are marked **[compliance]**
 
 ## Unreleased — 0.5.0 (roadmap Phases 1–5)
 
+### Windows local install (deferred item — §7 local tier, first cut)
+- deploy/windows: dependency-free PowerShell installer (Node check, build,
+  embedded database, /setup wizard, start-at-sign-in task) + a console
+  server manager with the §7.2 contract — status, start/stop/restart,
+  change port, office-LAN toggle with managed firewall rule, open app,
+  recent logs. Data (embedded DB + uploads + log) lives in one backupable
+  folder. Standalone build output is now Docker-only so `next start` works
+  on this tier.
+
+### Spanish (staff app) — foundation + first screens (deferred item)
+- Per-user UI language (English / Español) with a toggle in the user menu;
+  LangProvider lifts the portal's colocated EN/ES dictionary pattern app-wide
+- Translated: sidebar, top bar (search, user menu), and the full intake
+  wizard (all six steps, worksheet, FPL panel, duplicate warnings, review)
+- Note: characteristic question labels come from Settings → Forms (data, not
+  code) — agencies can bilingualize those directly; translations pending a
+  native-speaker review pass
+
+### Security: two-step verification + device management (deferred item)
+- TOTP MFA (RFC 6238, no new dependencies): per-account enrollment with
+  manual-entry key + otpauth link, 8 single-use recovery codes (hashed at
+  rest, shown once), two-step sign-in with short-lived pending sessions and
+  token rotation, rate-limited verification, operator lockout reset
+  (`npm run mfa:reset -- <username>`, audited, revokes all sessions)
+- /security page for every staff account: manage two-step verification and
+  see/revoke signed-in devices (created, browser/OS, expiry) + sign out
+  everywhere else; raw session tokens never reach the client (fingerprints)
+
+### Instrument verification (post-Phase 5)
+- **[compliance]** Verified the catalog against the OMB-approved Annual Report
+  3.0 instrument PDF (`CATALOG_VERSION` → `AR-3.0.1`):
+  - Module numbering corrected: Individual & Family Level is **Module 3**
+    (Community is Module 4) — labels updated app-wide
+  - C1 is "Gender Identity" with a third option (Transgender, non-binary, or
+    another gender)
+  - C8 option is "Migrant or Seasonal Farm Worker" (old short value aliased)
+  - D9 adds "Single Parent Non-Binary, Transgender, or Another Gender"
+  - Sections A (SRV/SDA) and B (FNPI) code lists diffed against the PDF:
+    exact match, no changes needed
+  - Full record in docs/compliance/ar-3.0.md
+
 ### Phase 1 — Foundations
 - Apache-2.0 license, NOTICE, contributor/security docs, architecture doc
 - Vitest suite + GitHub Actions CI (typecheck, tests, PGlite smoke, build)
@@ -31,7 +72,7 @@ tracks a federal instrument or guideline revision) are marked **[compliance]**
   prefill; 2026 active in fresh installs
 - Income worksheet (structured entries, state-configurable lookback) and
   frozen eligibility determinations on approve/deny
-- Module labeling corrected: Individual & Family Level = Module 4
+- Module labeling pass (superseded by the instrument verification above)
 
 ### Phase 3 — Genericization
 - First-run setup wizard (`/setup`) + production init (`CSBG_DEMO_SEED=0`):

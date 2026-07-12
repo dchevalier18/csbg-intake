@@ -1,5 +1,5 @@
 "use client";
-/* Reports — CSBG Annual Report rollup preview (Module 4). Pixel port of
+/* Reports — CSBG Annual Report rollup preview (Module 3). Pixel port of
    screens-reports.jsx; all data arrives pre-tallied from the server page. */
 import { useState } from "react";
 import { Chip, CodeChip, Kpi, Meter, PageHead, Panel } from "@/components/ui";
@@ -81,11 +81,11 @@ export function ReportsClient({ data, canManageGoals, fnpiOptions }: {
             <button className="calv-btn calv-btn--quiet calv-btn--sm"
               onClick={() => download("/reports/export", "CSV export generated.")}>Export CSV</button>
             <button className="calv-btn calv-btn--quiet calv-btn--sm"
-              onClick={() => download("/reports/export?xlsx=1", "Module 4 workbook exported — Sections A, B & C plus the validation sheet.")}>
-              Module 4 workbook (Excel)
+              onClick={() => download("/reports/export?xlsx=1", "Module 3 workbook exported — Sections A, B & C plus the validation sheet.")}>
+              Module 3 workbook (Excel)
             </button>
             <button className="calv-btn calv-btn--primary calv-btn--sm"
-              onClick={() => download("/reports/export?packet=1", "Annual Report packet drafted — Module 4 Sections A, B & C.")}>
+              onClick={() => download("/reports/export?packet=1", "Annual Report packet drafted — Module 3 Sections A, B & C.")}>
               <I name="doc" size={13} /> Draft Annual Report
             </button>
           </div>
@@ -93,8 +93,8 @@ export function ReportsClient({ data, canManageGoals, fnpiOptions }: {
       />
 
       <div className="kpis">
-        <Kpi kick="Individuals served (unduplicated)" value={fmt(agency.individualsServed)} foot="Module 4 Sec. C, line A" />
-        <Kpi kick="Households served (unduplicated)" value={fmt(agency.householdsServed)} foot="Module 4 Sec. C, line B" accent="var(--calv-teal)" />
+        <Kpi kick="Individuals served (unduplicated)" value={fmt(agency.individualsServed)} foot="Module 3 Sec. C, line A" />
+        <Kpi kick="Households served (unduplicated)" value={fmt(agency.householdsServed)} foot="Module 3 Sec. C, line B" accent="var(--calv-teal)" />
         <Kpi kick="New enrollments this FY" value={fmt(agency.newThisFY)} accent="var(--calv-sage)" />
         <Kpi kick="Records report-ready" value={readyPct + "%"} foot={(100 - readyPct) + "% have Unknown / Not Reported fields"} tone="bad" accent="var(--calv-amber)" />
       </div>
@@ -149,7 +149,7 @@ export function ReportsClient({ data, canManageGoals, fnpiOptions }: {
       ) : null}
 
       {tab === "Services" ? (
-        <Panel title="Module 4, Section A — services by domain" sub={`Unduplicated individuals served, ${fy.short} to date. Click a domain in the full product to drill to service-code level.`}>
+        <Panel title="Module 3, Section A — services by domain" sub={`Unduplicated individuals served, ${fy.short} to date. Click a domain in the full product to drill to service-code level.`}>
           <div className="bars-h" style={{ maxWidth: 760 }}>
             {data.srvByDomain.map((d) => (
               <div className="bar-h" key={d.domain} style={{ gridTemplateColumns: "220px 1fr 70px" }}>
@@ -166,7 +166,7 @@ export function ReportsClient({ data, canManageGoals, fnpiOptions }: {
       ) : null}
 
       {tab === "Outcomes (FNPI)" ? (
-        <Panel title="Module 4, Section B — Individual & Family NPIs" sub={`Actuals vs ${fy.short} targets. 'Achieving outcome' = actual ÷ number served; 'target accuracy' = actual ÷ target.`}>
+        <Panel title="Module 3, Section B — Individual & Family NPIs" sub={`Actuals vs ${fy.short} targets. 'Achieving outcome' = actual ÷ number served; 'target accuracy' = actual ÷ target.`}>
           <table className="data">
             <thead><tr><th>Indicator</th><th className="num">Served</th><th className="num">Target</th><th className="num">Actual</th><th className="num">% achieving</th><th style={{ width: 170 }}>Target accuracy</th><th>Pace</th></tr></thead>
             <tbody>

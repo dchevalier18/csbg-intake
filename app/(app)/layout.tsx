@@ -7,6 +7,7 @@ import { currentFY } from "@/lib/format";
 import { Sidebar } from "@/components/shell/Sidebar";
 import { Topbar } from "@/components/shell/Topbar";
 import { ToastProvider } from "@/components/toast";
+import { LangProvider } from "@/lib/i18n";
 import { signOut } from "../(auth)/actions";
 
 export default async function AppLayout({ children }: { children: ReactNode }) {
@@ -24,6 +25,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     : 0;
 
   return (
+    <LangProvider lang={user.locale}>
     <ToastProvider>
       <a href="#main" className="skip-link">Skip to main content</a>
       <div className="app" style={{ "--brand": org.accent } as CSSProperties}>
@@ -36,7 +38,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
         />
         <main className="content" id="main">
           <Topbar
-            user={{ name: user.name, role: user.role, initials: user.initials }}
+            user={{ name: user.name, role: user.role, initials: user.initials, locale: user.locale }}
             fyLabel={fy.label}
             onSignOut={signOut}
           />
@@ -44,5 +46,6 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
         </main>
       </div>
     </ToastProvider>
+    </LangProvider>
   );
 }

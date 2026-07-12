@@ -37,7 +37,7 @@ export async function scheduleFollowUp(clientId: string, date: string): Promise<
   return { ok: true, message: "Follow-up scheduled and added to your queue." };
 }
 
-/** Record (or update) a client-level FNPI outcome — feeds Module 4 Section B live.
+/** Record (or update) a client-level FNPI outcome — feeds Module 3 Section B live.
     One row per client × indicator × FY: recording again within the FY updates the
     existing row, so report counts stay unduplicated individuals. */
 export async function recordOutcome(clientId: string, input: {
@@ -91,7 +91,7 @@ export async function recordOutcome(clientId: string, input: {
   return {
     ok: true,
     message: status === "achieved"
-      ? `Outcome ${verb} — ${code} counts in Module 4, Section B for ${fy.short}.`
+      ? `Outcome ${verb} — ${code} counts in Module 3, Section B for ${fy.short}.`
       : `Outcome ${verb} — ${c.first} now counts as served under ${code}; mark it achieved at follow-up.`,
   };
 }

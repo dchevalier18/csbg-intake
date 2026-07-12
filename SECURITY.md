@@ -25,6 +25,10 @@ reasonable window to ship a fix before public disclosure.
   secrets are stored in the repository or the database.
 - Sign-in attempts are rate-limited per account and per address; sessions are
   httpOnly, SameSite=Lax, Secure in production.
+- Optional **two-step verification** (TOTP, RFC 6238 — any authenticator app)
+  per staff account, with single-use recovery codes and a server-console reset
+  (`npm run mfa:reset -- <username>`) for lockouts. Every account can review
+  and revoke its signed-in devices at /security.
 - Uploaded files are extension- and magic-byte-checked, size-capped, stored
   outside the web root, and served with `Cache-Control: private, no-store`.
 
