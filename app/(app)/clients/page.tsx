@@ -1,4 +1,4 @@
-import { requireUser } from "@/lib/auth";
+import { requireUser, isAdmin } from "@/lib/auth";
 import { visibleClients, visiblePrograms, getPrograms } from "@/lib/access";
 import { getOrg, getStaff, getEnabledIntakeFields } from "@/lib/data/core";
 import { fplStatusFor } from "@/lib/fpl";
@@ -50,6 +50,7 @@ export default async function ClientsPage() {
         rows={rows}
         programs={myPrograms.map((p) => ({ id: p.id, name: p.name }))}
         caseworkers={caseworkers.map((s) => ({ id: s.id, name: s.name }))}
+        canExport={isAdmin(user)}
       />
     </div>
   );

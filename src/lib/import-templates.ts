@@ -15,7 +15,7 @@ export interface ImportField {
 }
 
 export interface ImportTemplate {
-  id: "pantry" | "seminars" | "volunteers";
+  id: "pantry" | "seminars" | "volunteers" | "clients";
   name: string;
   blurb: string;         // template-picker card copy
   target: string;        // where the rows land, for the result message
@@ -23,6 +23,40 @@ export interface ImportTemplate {
 }
 
 export const IMPORT_TEMPLATES: ImportTemplate[] = [
+  {
+    id: "clients",
+    name: "Client migration",
+    blurb: "Bring enrolled clients over from a legacy system (CAP60, empowOR, spreadsheets) — one row per person.",
+    target: "the client directory",
+    fields: [
+      { key: "first", label: "First name", required: true, hint: "Given name",
+        aliases: ["first", "first name", "fname", "given name"] },
+      { key: "last", label: "Last name", required: true, hint: "Family name",
+        aliases: ["last", "last name", "lname", "surname", "family name"] },
+      { key: "dob", label: "Date of birth", required: true, hint: "2001-05-14 or 5/14/2001",
+        aliases: ["dob", "date of birth", "birth date", "birthdate", "born"] },
+      { key: "program", label: "Program", required: true, hint: "Program name or id to enroll into",
+        aliases: ["program", "program id", "program name", "enrolled program"] },
+      { key: "income", label: "Annual income ($)", required: false, hint: "Gross household income",
+        aliases: ["income", "annual income", "household income", "gross income", "yearly income"] },
+      { key: "hhSize", label: "Household size", required: false, hint: "Defaults to 1",
+        aliases: ["hh size", "hhsize", "household size", "family size", "size"] },
+      { key: "phone", label: "Phone", required: false, hint: "",
+        aliases: ["phone", "phone number", "telephone", "cell", "mobile"] },
+      { key: "address", label: "Address", required: false, hint: "",
+        aliases: ["address", "street", "street address", "address 1"] },
+      { key: "enrolled", label: "Enrollment date", required: false, hint: "Defaults to today",
+        aliases: ["enrolled", "enrollment date", "enroll date", "intake date", "start date"] },
+      { key: "sex", label: "Sex (C1)", required: false, hint: "Instrument answer or close variant",
+        aliases: ["sex", "gender"] },
+      { key: "race", label: "Race/ethnicity (C6)", required: false, hint: "Instrument answer or close variant",
+        aliases: ["race", "ethnicity", "race ethnicity", "race/ethnicity"] },
+      { key: "housing", label: "Housing (D11)", required: false, hint: "Own / Rent / Homeless / Other",
+        aliases: ["housing", "housing status", "housing situation", "tenure"] },
+      { key: "hhType", label: "Household type (D9)", required: false, hint: "Instrument answer or close variant",
+        aliases: ["hh type", "hhtype", "household type", "family type"] },
+    ],
+  },
   {
     id: "pantry",
     name: "Pantry aggregates",
