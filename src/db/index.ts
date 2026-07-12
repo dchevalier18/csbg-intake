@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import { Pool, Client } from "pg";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { PGlite } from "@electric-sql/pglite";
@@ -118,6 +120,11 @@ function createPgConn(): Conn {
 
 function createPgliteConn(): Conn {
   const dir = DATABASE_URL.slice("pglite://".length);
+  // PGlite's own mkdir is NOT recursive — a nested data dir (./data/pglite)
+  // fails with ENOENT unless the parents exist. Create the full path first.
+  if (dir && dir !== "memory") {
+    fs.mkdirSync(path.resolve(dir), { recursive: true });
+  }
   // single in-process engine — no advisory lock needed (or available across processes);
   // embedded mode is for one local server, never for multi-process deployments
   const client = dir && dir !== "memory" ? new PGlite(dir) : new PGlite();
