@@ -2,6 +2,7 @@ import { requireAdmin } from "@/lib/auth";
 import { db, t } from "@/db";
 import { getOrg, OPEN_STAGES } from "@/lib/data/core";
 import { getFplHistory } from "@/lib/fpl";
+import { JURISDICTIONS } from "@/lib/fpl-data";
 import { FplClient } from "./fpl-client";
 
 export default async function FplSettingsPage() {
@@ -13,6 +14,7 @@ export default async function FplSettingsPage() {
     perAdditional: s.perAdditional,
     effective: s.effective,
     status: s.status,
+    jurisdiction: s.jurisdiction,
   }));
 
   // Cases pinned per guideline year: enrolled clients + OPEN applications.
@@ -26,5 +28,13 @@ export default async function FplSettingsPage() {
   const pinned: Record<number, number> = {};
   for (const r of [...clientYears, ...appYears]) pinned[r.fplYear] = (pinned[r.fplYear] ?? 0) + 1;
 
-  return <FplClient history={history} ceiling={org.csbgCeiling} pinned={pinned} />;
+  return (
+    <FplClient
+      history={history}
+      ceiling={org.csbgCeiling}
+      pinned={pinned}
+      jurisdiction={org.jurisdiction}
+      jurisdictions={JURISDICTIONS.map((j) => ({ id: j.id, label: j.label }))}
+    />
+  );
 }

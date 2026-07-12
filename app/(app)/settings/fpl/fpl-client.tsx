@@ -4,7 +4,7 @@ import { Panel, Field, Chip } from "@/components/ui";
 import { I } from "@/components/icons";
 import { useToast } from "@/components/toast";
 import { money, longDate } from "@/lib/format";
-import { patchActiveFpl, setCsbgCeiling, publishFpl, makeFplActive } from "./actions";
+import { patchActiveFpl, setCsbgCeiling, publishFpl, makeFplActive, setJurisdiction, officialFplFor } from "./actions";
 
 interface Sched {
   year: number;
@@ -12,13 +12,15 @@ interface Sched {
   perAdditional: number;
   effective: string;
   status: string;
+  jurisdiction: string | null;
 }
 
 const histDate = (iso: string) =>
   new Date(iso + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 
-export function FplClient({ history, ceiling: ceilingProp, pinned }: {
+export function FplClient({ history, ceiling: ceilingProp, pinned, jurisdiction: jurisdictionProp, jurisdictions }: {
   history: Sched[]; ceiling: number; pinned: Record<number, number>;
+  jurisdiction: string; jurisdictions: Array<{ id: string; label: string }>;
 }) {
   const toast = useToast();
   const sorted = [...history].sort((a, b) => b.year - a.year);
@@ -27,10 +29,12 @@ export function FplClient({ history, ceiling: ceilingProp, pinned }: {
   const [base, setBase] = useState(String(active?.base ?? 0));
   const [per, setPer] = useState(String(active?.perAdditional ?? 0));
   const [ceiling, setCeiling] = useState(ceilingProp);
+  const [jurisdiction, setJurisdictionState] = useState(jurisdictionProp);
   const [showPublish, setShowPublish] = useState(false);
   const [pYear, setPYear] = useState(String((active?.year ?? 2026) + 1));
   const [pBase, setPBase] = useState(String(active?.base ?? 0));
   const [pPer, setPPer] = useState(String(active?.perAdditional ?? 0));
+  const [prefillNote, setPrefillNote] = useState<string | null>(null);
 
   useEffect(() => {
     setBase(String(active?.base ?? 0));
@@ -40,6 +44,27 @@ export function FplClient({ history, ceiling: ceilingProp, pinned }: {
     setPPer(String(active?.perAdditional ?? 0));
   }, [active?.year, active?.base, active?.perAdditional]);
   useEffect(() => { setCeiling(ceilingProp); }, [ceilingProp]);
+  useEffect(() => { setJurisdictionState(jurisdictionProp); }, [jurisdictionProp]);
+
+  // Prefill "Publish new year" with the official HHS figures for the chosen
+  // year + agency jurisdiction, when this build carries them.
+  useEffect(() => {
+    let cancelled = false;
+    const y = Number(pYear);
+    if (!Number.isFinite(y)) return;
+    officialFplFor(y).then((o) => {
+      if (cancelled) return;
+      if (o) {
+        setPBase(String(o.base));
+        setPPer(String(o.perAdditional));
+        setPrefillNote(`Prefilled from the published HHS ${y} table (${o.label}), effective ${longDate(o.effective)}.`);
+      } else {
+        setPrefillNote(null);
+      }
+    });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pYear, jurisdiction, showPublish]);
 
   if (!active) return null;
 
@@ -47,6 +72,7 @@ export function FplClient({ history, ceiling: ceilingProp, pinned }: {
   const p = Number(per) || 0;
   const annualOf = (size: number) => b + p * (size - 1);
   const sizes = [1, 2, 3, 4, 5, 6, 7, 8];
+  const jurisdictionLabelOf = (id: string | null) => jurisdictions.find((j) => j.id === id)?.label;
 
   async function commitActive() {
     if (!active) return;
@@ -66,6 +92,12 @@ export function FplClient({ history, ceiling: ceilingProp, pinned }: {
     setCeiling(v);
     const res = await setCsbgCeiling(v);
     if (!res.ok && res.message) toast(res.message);
+  }
+
+  async function onJurisdiction(id: string) {
+    setJurisdictionState(id);
+    const res = await setJurisdiction(id);
+    if (res.message) toast(res.message);
   }
 
   async function onPublish() {
@@ -88,7 +120,17 @@ export function FplClient({ history, ceiling: ceilingProp, pinned }: {
               <Field label="Household of 1 (annual $)"><input type="number" step="10" value={base} onChange={(e) => setBase(e.target.value)} onBlur={commitActive} /></Field>
               <Field label="Each additional person (+$)"><input type="number" step="10" value={per} onChange={(e) => setPer(e.target.value)} onBlur={commitActive} /></Field>
             </div>
-            <p style={{ fontSize: 11.5, color: "var(--calv-slate-65)", margin: "12px 0 0" }}>Effective {longDate(active.effective)} · 48 contiguous states — Alaska & Hawaii use separate tables.</p>
+            <p style={{ fontSize: 11.5, color: "var(--calv-slate-65)", margin: "12px 0 0" }}>
+              Effective {longDate(active.effective)}
+              {jurisdictionLabelOf(active.jurisdiction) ? ` · ${jurisdictionLabelOf(active.jurisdiction)} table` : ""}.
+            </p>
+          </Panel>
+          <Panel title="Guideline table (jurisdiction)" sub="HHS publishes separate tables for the 48 contiguous states & D.C., Alaska, and Hawaii. This choice prefills future publishes — years already published keep their stored dollars.">
+            <div className="field" style={{ maxWidth: 280 }}>
+              <select value={jurisdiction} onChange={(e) => onJurisdiction(e.target.value)}>
+                {jurisdictions.map((j) => <option key={j.id} value={j.id}>{j.label}</option>)}
+              </select>
+            </div>
           </Panel>
           <Panel title="CSBG income ceiling" sub="Your state's eligibility limit as a percentage of FPL. Applied at assessment time against the schedule in force.">
             <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
@@ -129,11 +171,13 @@ export function FplClient({ history, ceiling: ceilingProp, pinned }: {
               <button className="calv-btn calv-btn--primary calv-btn--sm" onClick={onPublish}><I name="check" size={13} /> Publish & activate</button>
               <button className="calv-btn calv-btn--quiet calv-btn--sm" onClick={() => setShowPublish(false)}>Cancel</button>
             </div>
-            <p style={{ fontSize: 11.5, color: "var(--calv-slate-65)", margin: "10px 0 0" }}>The current schedule is archived automatically. New intakes assess against the new year; nothing already assessed is recalculated.</p>
+            <p style={{ fontSize: 11.5, color: "var(--calv-slate-65)", margin: "10px 0 0" }}>
+              {prefillNote ?? "No published HHS table for that year ships with this build — enter the Federal Register figures."} The current schedule is archived automatically. New intakes assess against the new year; nothing already assessed is recalculated.
+            </p>
           </div>
         ) : null}
         <table className="data">
-          <thead><tr><th>Guideline year</th><th className="num">Household of 1</th><th className="num">Each additional</th><th>Effective</th><th>Status</th><th className="num">Cases pinned</th><th></th></tr></thead>
+          <thead><tr><th>Guideline year</th><th className="num">Household of 1</th><th className="num">Each additional</th><th>Effective</th><th>Table</th><th>Status</th><th className="num">Cases pinned</th><th></th></tr></thead>
           <tbody>
             {sorted.map((s) => (
               <tr key={s.year}>
@@ -141,6 +185,7 @@ export function FplClient({ history, ceiling: ceilingProp, pinned }: {
                 <td className="num">{money(s.base)}</td>
                 <td className="num">{money(s.perAdditional)}</td>
                 <td>{histDate(s.effective)}</td>
+                <td style={{ fontSize: 12, color: "var(--calv-slate-65)" }}>{jurisdictionLabelOf(s.jurisdiction) ?? "—"}</td>
                 <td>{s.status === "active" ? <Chip tone="sage">Active</Chip> : <Chip>Archived</Chip>}</td>
                 <td className="num">{pinned[s.year] || "—"}</td>
                 <td style={{ textAlign: "right" }}>{s.status !== "active" ? <button className="calv-btn calv-btn--quiet calv-btn--sm" onClick={() => onMakeActive(s.year)}>Make active</button> : null}</td>

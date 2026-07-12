@@ -16,6 +16,7 @@ export interface OrgProps {
   logoData: string | null;
   fyStart: string;
   csbgCeiling: number;
+  incomeLookbackDays: number;
 }
 
 const LABEL_KICK: React.CSSProperties = {
@@ -30,10 +31,12 @@ export function OrgSettingsClient({ org }: { org: OrgProps }) {
   const [form, setForm] = useState({
     name: org.name, short: org.short, tagline: org.tagline,
     region: org.region, fyStart: org.fyStart, csbgCeiling: org.csbgCeiling,
+    incomeLookbackDays: org.incomeLookbackDays,
   });
   const savedRef = useRef(JSON.stringify({
     name: org.name, short: org.short, tagline: org.tagline,
     region: org.region, fyStart: org.fyStart, csbgCeiling: org.csbgCeiling,
+    incomeLookbackDays: org.incomeLookbackDays,
   }));
   const [accent, setAccent] = useState(org.accent);
   const [logoMode, setLogoMode] = useState(org.logoMode);
@@ -115,6 +118,11 @@ export function OrgSettingsClient({ org }: { org: OrgProps }) {
             <Field label="CSBG income ceiling" hint="% of Federal Poverty Level — your state's limit">
               <select value={form.csbgCeiling} onChange={(e) => setAndSave("csbgCeiling", Number(e.target.value))}>
                 {[100, 125, 150, 175, 200].map((p) => <option key={p} value={p}>{p}% FPL</option>)}
+              </select>
+            </Field>
+            <Field label="Income lookback" hint="State documentation policy — the window intake income annualizes from">
+              <select value={form.incomeLookbackDays} onChange={(e) => setAndSave("incomeLookbackDays", Number(e.target.value))}>
+                {[[30, "30 days"], [60, "60 days"], [90, "90 days"], [365, "12 months"]].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
               </select>
             </Field>
           </div>

@@ -17,7 +17,33 @@ export const organization = pgTable("organization", {
   logoData: text("logo_data"),                            // data URL when logoMode = 'upload'
   fyStart: text("fy_start").notNull().default("October"),
   csbgCeiling: integer("csbg_ceiling").notNull().default(125), // % of FPL
+  jurisdiction: text("jurisdiction").notNull().default("contiguous48"), // FPL table: 'contiguous48' | 'alaska' | 'hawaii'
+  incomeLookbackDays: integer("income_lookback_days").notNull().default(90), // state income-documentation policy
 });
+
+/* Structured income worksheet — entries annualize into the single `income`
+   figure; the worksheet itself is retained for audit/documentation. */
+export interface IncomeWorksheet {
+  entries: Array<{ source: string; amount: number; period: "weekly" | "biweekly" | "twice-monthly" | "monthly" | "annual" }>;
+  lookbackDays: number;   // agency policy at entry time
+  annualized: number;     // computed total, mirrors the `income` column
+}
+
+/* Frozen eligibility determination — the exact guideline dollars, ceiling, and
+   inputs a decision used. Written at submit, refreshed at approval; never
+   recomputed afterward. */
+export interface Determination {
+  at: string;             // ISO datetime
+  year: number;           // guideline year used
+  jurisdiction: string | null;
+  base: number;           // schedule dollars (household of 1)
+  perAdditional: number;
+  ceiling: number;        // % of FPL the decision was measured against
+  income: number;
+  hhSize: number;
+  pct: number;            // computed % of FPL
+  eligible: boolean;
+}
 
 // ---------- Users, sessions, program assignment ----------
 export const users = pgTable("users", {
@@ -87,6 +113,7 @@ export const clients = pgTable("clients", {
   housing: text("housing"),
   income: integer("income").notNull().default(0), // annual gross $
   incomeSrc: text("income_src"),
+  incomeWorksheet: jsonb("income_worksheet").$type<IncomeWorksheet>(), // structured entries behind `income`
   caseworkerId: text("caseworker_id"),
   enrolled: text("enrolled").notNull(),         // date of first enrollment
   fplYear: integer("fpl_year").notNull(),       // pinned guideline year (point-in-time integrity)
@@ -124,6 +151,8 @@ export const applications = pgTable("applications", {
   housing: text("housing"),
   income: integer("income").notNull().default(0),
   incomeSrc: text("income_src"),
+  incomeWorksheet: jsonb("income_worksheet").$type<IncomeWorksheet>(),
+  determination: jsonb("determination").$type<Determination>(), // frozen eligibility math (see interface above)
   custom: jsonb("custom").$type<Record<string, string>>().notNull().default({}),
   programId: text("program_id").notNull(),
   caseworkerId: text("caseworker_id"),
@@ -194,6 +223,10 @@ export const fplSchedules = pgTable("fpl_schedules", {
   perAdditional: integer("per_additional").notNull(),
   effective: text("effective").notNull(),
   status: text("status").notNull().default("archived"), // 'active' | 'archived'
+  // which official HHS table the dollars came from ('contiguous48'|'alaska'|'hawaii').
+  // Informational: the dollars are stored above, so a later jurisdiction change
+  // never rewrites pinned history.
+  jurisdiction: text("jurisdiction"),
 });
 
 // ---------- Admin-editable answer lists + intake fields ----------

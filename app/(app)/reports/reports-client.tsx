@@ -1,5 +1,5 @@
 "use client";
-/* Reports — CSBG Annual Report rollup preview (Module 3). Pixel port of
+/* Reports — CSBG Annual Report rollup preview (Module 4). Pixel port of
    screens-reports.jsx; all data arrives pre-tallied from the server page. */
 import { useState } from "react";
 import { Chip, CodeChip, Kpi, Meter, PageHead, Panel } from "@/components/ui";
@@ -63,7 +63,7 @@ export function ReportsClient({ data }: { data: ReportRollup }) {
             <button className="calv-btn calv-btn--quiet calv-btn--sm"
               onClick={() => download("/reports/export", "CSV export generated.")}>Export CSV</button>
             <button className="calv-btn calv-btn--primary calv-btn--sm"
-              onClick={() => download("/reports/export?packet=1", "Annual Report packet drafted — Module 3 Sections A, B & C.")}>
+              onClick={() => download("/reports/export?packet=1", "Annual Report packet drafted — Module 4 Sections A, B & C.")}>
               <I name="doc" size={13} /> Draft Annual Report
             </button>
           </div>
@@ -71,8 +71,8 @@ export function ReportsClient({ data }: { data: ReportRollup }) {
       />
 
       <div className="kpis">
-        <Kpi kick="Individuals served (unduplicated)" value={fmt(agency.individualsServed)} foot="Module 3 Sec. C, line A" />
-        <Kpi kick="Households served (unduplicated)" value={fmt(agency.householdsServed)} foot="Module 3 Sec. C, line B" accent="var(--calv-teal)" />
+        <Kpi kick="Individuals served (unduplicated)" value={fmt(agency.individualsServed)} foot="Module 4 Sec. C, line A" />
+        <Kpi kick="Households served (unduplicated)" value={fmt(agency.householdsServed)} foot="Module 4 Sec. C, line B" accent="var(--calv-teal)" />
         <Kpi kick="New enrollments this FY" value={fmt(agency.newThisFY)} accent="var(--calv-sage)" />
         <Kpi kick="Records report-ready" value={readyPct + "%"} foot={(100 - readyPct) + "% have Unknown / Not Reported fields"} tone="bad" accent="var(--calv-amber)" />
       </div>
@@ -86,15 +86,46 @@ export function ReportsClient({ data }: { data: ReportRollup }) {
       </div>
 
       {tab === "Characteristics" ? (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 13 }}>
-          {data.characteristics.map((m) => (
-            <MiniTable key={m.code} title={m.title} code={m.code} rows={m.rows} total={m.total} />
-          ))}
-        </div>
+        <>
+          <Panel
+            title="Section C top line — records with one or more characteristics obtained"
+            sub={`Live records only (pre-system baseline shown in the KPI row): ${fmt(data.sectionCTotals.individuals)} individuals · ${fmt(data.sectionCTotals.households)} households. Every table below totals back to its reportable universe, Unknown / Not Reported included — the same sum rule the federal submission validates.`}
+          >
+            {(() => {
+              const issues = data.dataQuality.filter((q) => q.unknown > 0 || q.drift.length > 0);
+              if (issues.length === 0) {
+                return <p style={{ fontSize: 12.5, color: "var(--calv-slate-65)", margin: 0 }}>
+                  No validation gaps — every characteristic canonicalizes cleanly with nothing Unknown.
+                </p>;
+              }
+              return (
+                <table className="data" style={{ fontSize: 12.5 }}>
+                  <thead><tr><th>Characteristic</th><th>Unknown / Not Reported</th><th>Answer-list drift (stored values that don&apos;t match the federal form)</th></tr></thead>
+                  <tbody>
+                    {issues.map((q) => (
+                      <tr key={q.title}>
+                        <td>{q.title}</td>
+                        <td>{q.unknown > 0 ? `${fmt(q.unknown)} of ${fmt(q.total)}` : "—"}</td>
+                        <td>{q.drift.length > 0
+                          ? q.drift.map((d) => `“${d.value}” ×${d.count}`).join(" · ")
+                          : "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              );
+            })()}
+          </Panel>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 13, marginTop: 13 }}>
+            {data.characteristics.map((m) => (
+              <MiniTable key={m.title} title={m.title} code={m.code} rows={m.rows} total={m.total} />
+            ))}
+          </div>
+        </>
       ) : null}
 
       {tab === "Services" ? (
-        <Panel title="Module 3, Section A — services by domain" sub={`Unduplicated individuals served, ${fy.short} to date. Click a domain in the full product to drill to service-code level.`}>
+        <Panel title="Module 4, Section A — services by domain" sub={`Unduplicated individuals served, ${fy.short} to date. Click a domain in the full product to drill to service-code level.`}>
           <div className="bars-h" style={{ maxWidth: 760 }}>
             {data.srvByDomain.map((d) => (
               <div className="bar-h" key={d.domain} style={{ gridTemplateColumns: "220px 1fr 70px" }}>
@@ -111,7 +142,7 @@ export function ReportsClient({ data }: { data: ReportRollup }) {
       ) : null}
 
       {tab === "Outcomes (FNPI)" ? (
-        <Panel title="Module 3, Section B — Individual & Family NPIs" sub={`Actuals vs ${fy.short} targets. 'Achieving outcome' = actual ÷ number served; 'target accuracy' = actual ÷ target.`}>
+        <Panel title="Module 4, Section B — Individual & Family NPIs" sub={`Actuals vs ${fy.short} targets. 'Achieving outcome' = actual ÷ number served; 'target accuracy' = actual ÷ target.`}>
           <table className="data">
             <thead><tr><th>Indicator</th><th className="num">Served</th><th className="num">Target</th><th className="num">Actual</th><th className="num">% achieving</th><th style={{ width: 170 }}>Target accuracy</th><th>Pace</th></tr></thead>
             <tbody>

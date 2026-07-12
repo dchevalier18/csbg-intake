@@ -134,7 +134,7 @@ export default async function DashboardPage() {
           </div>
         </Panel>
 
-        <Panel title="Data quality" sub="Records missing All Characteristics Report fields (Module 3, Sec. C).">
+        <Panel title="Data quality" sub="Records missing All Characteristics Report fields (Module 4, Sec. C).">
           {issues.slice(0, 4).map((c) => {
             const missing = completenessItems(c, fields).filter((i) => !i.filled).map((i) => i.label).join(" · ");
             return (

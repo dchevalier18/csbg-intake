@@ -189,7 +189,7 @@ export function ServicesClient({ clients, services, domains, programs, visiblePr
         {(chosen || file) ? (
           <p style={{ fontSize: 12, color: "var(--calv-slate-65)", margin: "10px 0 0", display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
             {chosen ? <span>
-              Will report as <span className="code-chip">{chosen.code}</span> under <strong style={{ fontWeight: 600 }}>{chosenDomain?.name}</strong> in Module 3, Section A.
+              Will report as <span className="code-chip">{chosen.code}</span> under <strong style={{ fontWeight: 600 }}>{chosenDomain?.name}</strong> in Module 4, Section A.
             </span> : null}
             {file ? <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
               <I name="clip" size={12} /> {file.name}
