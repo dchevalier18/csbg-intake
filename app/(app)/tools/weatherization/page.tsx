@@ -1,7 +1,7 @@
 import { asc, inArray } from "drizzle-orm";
 import { db, t } from "@/db";
-import { requireUser } from "@/lib/auth";
-import { userHasCap, visiblePrograms } from "@/lib/access";
+import { isAdmin, requireUser } from "@/lib/auth";
+import { userHasCap, visibleClients, visiblePrograms } from "@/lib/access";
 import { programType } from "@/lib/program-types";
 import { kvGet } from "@/lib/data/core";
 import { todayIso } from "@/lib/format";
@@ -23,10 +23,18 @@ export default async function WeatherizationPage() {
   const contractors = wxProgramIds.length
     ? await db.select().from(t.contractors).where(inArray(t.contractors.programId, wxProgramIds)).orderBy(asc(t.contractors.id))
     : [];
+  const vouchers = wxProgramIds.length
+    ? await db.select().from(t.wxVouchers).where(inArray(t.wxVouchers.programId, wxProgramIds)).orderBy(asc(t.wxVouchers.id))
+    : [];
   const stats = await kvGet<WxStats>("wxStats", { unitsCompletedFY: 0, avgDaysAuditToQc: 0 });
 
+  const clients = (await visibleClients(user))
+    .map((c) => ({ id: c.id, name: c.first + " " + c.last }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
   // Credentials expiring within 60 days of today.
-  const cutoffDate = new Date(todayIso() + "T12:00:00");
+  const today = todayIso();
+  const cutoffDate = new Date(today + "T12:00:00");
   cutoffDate.setDate(cutoffDate.getDate() + 60);
   const cutoff = `${cutoffDate.getFullYear()}-${String(cutoffDate.getMonth() + 1).padStart(2, "0")}-${String(cutoffDate.getDate()).padStart(2, "0")}`;
 
@@ -41,6 +49,8 @@ export default async function WeatherizationPage() {
       if (c[cred.key] <= cutoff) expiring.push(`${c.name.split(" ").slice(0, 2).join(" ")} ${cred.label}`);
     }
   }
+
+  const contractorName = new Map(contractors.map((c) => [c.id, c.name]));
 
   return (
     <WxClient
@@ -57,7 +67,8 @@ export default async function WeatherizationPage() {
         clientId: j.clientId ?? null,
         address: j.address,
         stage: j.stage,
-        contractor: contractors.find((c) => c.id === j.contractorId)?.name ?? null,
+        contractorId: j.contractorId,
+        contractor: j.contractorId ? contractorName.get(j.contractorId) ?? null : null,
         funding: j.funding,
         measures: j.measures,
       }))}
@@ -72,8 +83,23 @@ export default async function WeatherizationPage() {
         bpi: c.bpiExp,
         epaRrp: c.epaRrpExp,
         qcPass: c.qcPass,
+        expired: c.insuranceExp <= today || c.bpiExp <= today || c.epaRrpExp <= today,
       }))}
+      vouchers={vouchers.map((v) => ({
+        id: v.id,
+        contractor: contractorName.get(v.contractorId) ?? v.contractorId,
+        contractorId: v.contractorId,
+        jobId: v.jobId,
+        date: v.date,
+        amount: v.amount,
+        memo: v.memo,
+        status: v.status,
+        paidAt: v.paidAt,
+      }))}
+      clients={clients}
       cutoff={cutoff}
+      today={today}
+      admin={isAdmin(user)}
     />
   );
 }

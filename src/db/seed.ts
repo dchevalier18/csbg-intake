@@ -4,6 +4,7 @@ import * as t from "./schema";
 import * as schema from "./schema";
 import { SERVICES, FNPIS } from "@/lib/csbg-catalog";
 import { programType } from "@/lib/program-types";
+import { prevMonthYm, todayIso } from "@/lib/format";
 
 /* ============================================================
    Seed — realistic fictional Lehigh Valley demo data mapped to
@@ -424,7 +425,9 @@ export async function runSeed(db: DB): Promise<void> {
     { id: "WX-2258", programId: "wx", clientName: "Kateryna Bondar", clientId: null,     address: "305 Tilghman St, Allentown",  stage: "audit",    contractorId: "W-04", funding: "Pending eligibility", measures: "Audit blocked — awaiting landlord agreement (see eligibility queue)", started: "2026-06-08" },
   ]);
 
-  // Second Harvest — pantry member agencies + May reports
+  // Second Harvest — pantry member agencies + reports for the open cycle
+  // (the month that just closed, so the demo story tracks the real calendar)
+  const reportMonth = prevMonthYm(todayIso());
   const agencies = [
     { id: "P-014", name: "New Bethany Ministries",            town: "Bethlehem",   county: "Northampton", contact: "S. Alvarez",   phone: "(610) 555-0310", compliance: "current",        may: { status: "received", households: 412, lbs: 18240 } },
     { id: "P-022", name: "Easton Area Neighborhood Center",   town: "Easton",      county: "Northampton", contact: "D. Brooks",    phone: "(610) 555-0322", compliance: "current",        may: { status: "received", households: 367, lbs: 15910 } },
@@ -435,7 +438,7 @@ export async function runSeed(db: DB): Promise<void> {
   ];
   await db.insert(t.pantryAgencies).values(agencies.map(({ may: _m, ...a }) => ({ ...a, programId: "shfb" })));
   await db.insert(t.pantryReports).values(agencies.map((a) => ({
-    agencyId: a.id, month: "2026-05", status: a.may.status, households: a.may.households, lbs: a.may.lbs,
+    agencyId: a.id, month: reportMonth, status: a.may.status, households: a.may.households, lbs: a.may.lbs,
   })));
 
   // Housing Counseling — seminars
@@ -487,12 +490,27 @@ export async function runSeed(db: DB): Promise<void> {
 
   // Rising Tide — loan portfolio
   await db.insert(t.loans).values([
-    { id: "L-3041", programId: "rtide", borrower: "Hassan Farah",   clientId: null,     purpose: "Halal food truck — equipment & buildout",       principal: 18000, balance: 12480, rate: "4.5%", term: "48 mo", status: "current", nextDue: "2026-06-20" },
-    { id: "L-3028", programId: "rtide", borrower: "Priya Raman",    clientId: "C-2415", purpose: "Home daycare — licensing & supplies",           principal: 9500,  balance: 3120,  rate: "4.0%", term: "36 mo", status: "current", nextDue: "2026-06-18" },
-    { id: "L-3015", programId: "rtide", borrower: "Marcus Okonkwo", clientId: null,     purpose: "Barbershop chair rental + tools",               principal: 6000,  balance: 5400,  rate: "5.0%", term: "24 mo", status: "late",    nextDue: "2026-05-25" },
-    { id: "L-2990", programId: "rtide", borrower: "Lucia Ferraro",  clientId: null,     purpose: "Seamstress studio — industrial machine",        principal: 7200,  balance: 0,     rate: "4.5%", term: "30 mo", status: "paid",    nextDue: null },
-    { id: "L-3052", programId: "rtide", borrower: "Dwayne Ellis",   clientId: null,     purpose: "Mobile auto-detailing startup",                 principal: 11000, balance: 10670, rate: "4.5%", term: "48 mo", status: "current", nextDue: "2026-06-28" },
-    { id: "L-3009", programId: "rtide", borrower: "Aisha Rahman",   clientId: null,     purpose: "Catering business — commercial kitchen deposit", principal: 14500, balance: 8990, rate: "4.0%", term: "42 mo", status: "current", nextDue: "2026-06-15" },
-    { id: "L-2978", programId: "rtide", borrower: "Tomás Delgado",  clientId: null,     purpose: "Landscaping equipment",                          principal: 8800, balance: 1450,  rate: "5.0%", term: "36 mo", status: "late",    nextDue: "2026-05-30" },
+    { id: "L-3041", programId: "rtide", borrower: "Hassan Farah",   clientId: null,     purpose: "Halal food truck — equipment & buildout",       principal: 18000, balance: 12480, rate: "4.5%", term: "48 mo", rateBps: 450, termMonths: 48, originated: "2025-03-20", status: "current", nextDue: "2026-06-20" },
+    { id: "L-3028", programId: "rtide", borrower: "Priya Raman",    clientId: "C-2415", purpose: "Home daycare — licensing & supplies",           principal: 9500,  balance: 3120,  rate: "4.0%", term: "36 mo", rateBps: 400, termMonths: 36, originated: "2024-06-18", status: "current", nextDue: "2026-06-18" },
+    { id: "L-3015", programId: "rtide", borrower: "Marcus Okonkwo", clientId: null,     purpose: "Barbershop chair rental + tools",               principal: 6000,  balance: 5400,  rate: "5.0%", term: "24 mo", rateBps: 500, termMonths: 24, originated: "2026-02-25", status: "late",    nextDue: "2026-05-25" },
+    { id: "L-2990", programId: "rtide", borrower: "Lucia Ferraro",  clientId: null,     purpose: "Seamstress studio — industrial machine",        principal: 7200,  balance: 0,     rate: "4.5%", term: "30 mo", rateBps: 450, termMonths: 30, originated: "2023-11-01", status: "paid",    nextDue: null },
+    { id: "L-3052", programId: "rtide", borrower: "Dwayne Ellis",   clientId: null,     purpose: "Mobile auto-detailing startup",                 principal: 11000, balance: 10670, rate: "4.5%", term: "48 mo", rateBps: 450, termMonths: 48, originated: "2026-03-28", status: "current", nextDue: "2026-06-28" },
+    { id: "L-3009", programId: "rtide", borrower: "Aisha Rahman",   clientId: null,     purpose: "Catering business — commercial kitchen deposit", principal: 14500, balance: 8990, rate: "4.0%", term: "42 mo", rateBps: 400, termMonths: 42, originated: "2024-10-15", status: "current", nextDue: "2026-06-15" },
+    { id: "L-2978", programId: "rtide", borrower: "Tomás Delgado",  clientId: null,     purpose: "Landscaping equipment",                          principal: 8800, balance: 1450,  rate: "5.0%", term: "36 mo", rateBps: 500, termMonths: 36, originated: "2023-12-30", status: "late",    nextDue: "2026-05-30" },
+  ]);
+  // Ledger history (most recent payments — older rows predate the system)
+  await db.insert(t.loanPayments).values([
+    { loanId: "L-3041", date: "2026-04-18", amount: 411, interest: 50, principal: 361, balanceAfter: 12843, staffId: "jb", note: "" },
+    { loanId: "L-3041", date: "2026-05-18", amount: 411, interest: 48, principal: 363, balanceAfter: 12480, staffId: "jb", note: "" },
+    { loanId: "L-3028", date: "2026-03-15", amount: 280, interest: 13, principal: 267, balanceAfter: 3657, staffId: "jb", note: "" },
+    { loanId: "L-3028", date: "2026-04-15", amount: 280, interest: 12, principal: 268, balanceAfter: 3389, staffId: "jb", note: "" },
+    { loanId: "L-3028", date: "2026-05-15", amount: 280, interest: 11, principal: 269, balanceAfter: 3120, staffId: "jb", note: "money order — receipt on file" },
+  ]);
+
+  // Weatherization — contractor expense vouchers
+  await db.insert(t.wxVouchers).values([
+    { id: "WXV-118", programId: "wx", contractorId: "W-01", jobId: "WX-2241", date: "2026-05-29", amount: 6840, memo: "Attic insulation + air sealing — final invoice", status: "paid",      createdBy: "jb", decidedBy: "tw", paidAt: "2026-06-05" },
+    { id: "WXV-121", programId: "wx", contractorId: "W-02", jobId: "WX-2248", date: "2026-06-06", amount: 4425, memo: "Furnace replacement — progress billing 2 of 3",  status: "approved", createdBy: "jb", decidedBy: "tw", paidAt: null },
+    { id: "WXV-122", programId: "wx", contractorId: "W-03", jobId: "WX-2255", date: "2026-06-08", amount: 1980, memo: "Window units (6) — materials on delivery",       status: "submitted", createdBy: "jb", decidedBy: null, paidAt: null },
   ]);
 }

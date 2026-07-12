@@ -1,6 +1,6 @@
 import { requireUser } from "@/lib/auth";
 import { Restricted } from "@/components/ui";
-import { getPrograms, userHasCap, visibleClients, visibleProgramIds } from "@/lib/access";
+import { getPrograms, userHasCap, visibleClients, visibleProgramIds, visiblePrograms } from "@/lib/access";
 import { kvGet } from "@/lib/data/core";
 import { currentFY, todayIso } from "@/lib/format";
 import { db, t } from "@/db";
@@ -21,7 +21,11 @@ export default async function VolunteersPage() {
 
   const programs = await getPrograms();
   const progById = new Map(programs.map((p) => [p.id, p]));
-  const clientIds = new Set((await visibleClients(user)).map((c) => c.id));
+  const myPrograms = (await visiblePrograms(user)).map((p) => ({ id: p.id, name: p.name }));
+  const clients = (await visibleClients(user))
+    .map((c) => ({ id: c.id, name: c.first + " " + c.last }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const clientIds = new Set(clients.map((c) => c.id));
 
   const rows: VolRow[] = (await db.select().from(t.volunteers))
     .filter((v) => (byVol.get(v.id) ?? []).some((pid) => ids.has(pid)))
@@ -42,5 +46,14 @@ export default async function VolunteersPage() {
 
   const stats = await kvGet<VolStats>("volStats", { totalHoursFY: 0, lowIncomeHoursFY: 0, activeVolunteers: 0 });
 
-  return <VolunteersClient stats={stats} rows={rows} fyShort={currentFY().short} today={todayIso()} />;
+  return (
+    <VolunteersClient
+      stats={stats}
+      rows={rows}
+      programs={myPrograms}
+      clients={clients}
+      fyShort={currentFY().short}
+      today={todayIso()}
+    />
+  );
 }

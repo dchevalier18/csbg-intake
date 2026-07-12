@@ -38,8 +38,8 @@ export default function LoansClient({ progShort, loans, clients }: {
   const [clientId, setClientId] = useState("");
   const [purpose, setPurpose] = useState("");
   const [principal, setPrincipal] = useState("");
-  const [rate, setRate] = useState("");
-  const [term, setTerm] = useState("");
+  const [apr, setApr] = useState("");
+  const [termMonths, setTermMonths] = useState("");
   const [paying, setPaying] = useState<LoanRow | null>(null);
   const [amount, setAmount] = useState("");
   const [busy, setBusy] = useState(false);
@@ -51,18 +51,19 @@ export default function LoansClient({ progShort, loans, clients }: {
   const repaid = loans.filter((l) => l.status === "paid").length;
 
   function openNew() {
-    setBorrower(""); setClientId(""); setPurpose(""); setPrincipal(""); setRate(""); setTerm("");
+    setBorrower(""); setClientId(""); setPurpose(""); setPrincipal(""); setApr(""); setTermMonths("");
     setCreating(true);
   }
 
-  const canCreate = borrower.trim().length > 0 && Number(principal) > 0;
+  const canCreate = borrower.trim().length > 0 && Number(principal) > 0
+    && apr.trim() !== "" && Number(apr) >= 0 && Number(termMonths) > 0;
 
   async function submitLoan() {
     if (!canCreate || busy) return;
     setBusy(true);
     const res = await createLoan({
       borrower, clientId: clientId || null, purpose,
-      principal: Number(principal), rate, term,
+      principal: Number(principal), aprPct: Number(apr), termMonths: Math.round(Number(termMonths)),
     });
     setBusy(false);
     toast(res.message);
@@ -113,7 +114,8 @@ export default function LoansClient({ progShort, loans, clients }: {
               const st = STATUS[l.status] ?? STATUS.current;
               return (
                 <tr key={l.id}>
-                  <td className="cname">{l.id}</td>
+                  <td className="cname"><Link className="tlink" style={{ textDecoration: "none" }} href={"/tools/loans/" + l.id}>{l.id}</Link>
+                    <div style={{ fontFamily: "var(--font-body)", fontWeight: 300, fontSize: 11, color: "var(--calv-slate-65)", textTransform: "none" }}>schedule &amp; ledger</div></td>
                   <td>{l.clientHref ? <Link className="tlink" style={{ textDecoration: "none", fontWeight: 600 }} href={l.clientHref}>{l.borrower}</Link> : l.borrower}</td>
                   <td style={{ color: "var(--calv-slate-65)", maxWidth: 260 }}>{l.purpose}</td>
                   <td className="num">{money(l.principal)}</td>
@@ -155,13 +157,18 @@ export default function LoansClient({ progShort, loans, clients }: {
               <Field label="Principal ($)" required>
                 <input type="number" min={0} value={principal} onChange={(e) => setPrincipal(e.target.value)} placeholder="e.g. 12000" />
               </Field>
-              <Field label="Rate">
-                <input value={rate} onChange={(e) => setRate(e.target.value)} placeholder="e.g. 4.5%" />
+              <Field label="Rate (% APR)" required hint="0 for interest-free">
+                <input type="number" min={0} max={100} step={0.25} value={apr} onChange={(e) => setApr(e.target.value)} placeholder="e.g. 4.5" />
               </Field>
-              <Field label="Term">
-                <input value={term} onChange={(e) => setTerm(e.target.value)} placeholder="e.g. 48 mo" />
+              <Field label="Term (months)" required>
+                <input type="number" min={1} max={600} step={1} value={termMonths} onChange={(e) => setTermMonths(e.target.value)} placeholder="e.g. 48" />
               </Field>
             </div>
+            {Number(principal) > 0 && Number(termMonths) > 0 && apr.trim() !== "" ? (
+              <div style={{ fontSize: 12.5, color: "var(--calv-slate-65)" }}>
+                The amortization schedule and payment ledger are generated on the loan&apos;s detail page after disbursement.
+              </div>
+            ) : null}
           </div>
           <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
             <button className="calv-btn calv-btn--quiet calv-btn--sm" onClick={() => setCreating(false)}>Cancel</button>
