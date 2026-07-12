@@ -6,6 +6,19 @@ tracks a federal instrument or guideline revision) are marked **[compliance]**
 
 ## Unreleased — 0.5.0 (roadmap Phases 1–5)
 
+### Instrument verification (post-Phase 5)
+- **[compliance]** Verified the catalog against the OMB-approved Annual Report
+  3.0 instrument PDF (`CATALOG_VERSION` → `AR-3.0.1`):
+  - Module numbering corrected: Individual & Family Level is **Module 3**
+    (Community is Module 4) — labels updated app-wide
+  - C1 is "Gender Identity" with a third option (Transgender, non-binary, or
+    another gender)
+  - C8 option is "Migrant or Seasonal Farm Worker" (old short value aliased)
+  - D9 adds "Single Parent Non-Binary, Transgender, or Another Gender"
+  - Sections A (SRV/SDA) and B (FNPI) code lists diffed against the PDF:
+    exact match, no changes needed
+  - Full record in docs/compliance/ar-3.0.md
+
 ### Phase 1 — Foundations
 - Apache-2.0 license, NOTICE, contributor/security docs, architecture doc
 - Vitest suite + GitHub Actions CI (typecheck, tests, PGlite smoke, build)
@@ -31,7 +44,7 @@ tracks a federal instrument or guideline revision) are marked **[compliance]**
   prefill; 2026 active in fresh installs
 - Income worksheet (structured entries, state-configurable lookback) and
   frozen eligibility determinations on approve/deny
-- Module labeling corrected: Individual & Family Level = Module 4
+- Module labeling pass (superseded by the instrument verification above)
 
 ### Phase 3 — Genericization
 - First-run setup wizard (`/setup`) + production init (`CSBG_DEMO_SEED=0`):

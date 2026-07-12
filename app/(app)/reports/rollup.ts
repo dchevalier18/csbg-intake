@@ -11,7 +11,7 @@ import type { Client } from "@/db/schema";
 import type { MiniRow, MiniTableData, DriftEntry, ReportRollup } from "./types";
 
 /* ============================================================
-   Live CSBG Annual Report 3.0 rollup (Module 4 Sections A/B/C).
+   Live CSBG Annual Report 3.0 rollup (Module 3 Sections A/B/C).
    Agency-wide by design — reports cover ALL enrolled clients,
    not the caller's program scope. Used by the Reports page and
    the /reports/export download route.
@@ -124,7 +124,7 @@ export async function buildRollup(): Promise<ReportRollup> {
 
   const drift = new Map<string, Map<string, number>>();
   const characteristics: MiniTableData[] = [
-    { title: "C1 · Sex", code: "Sec. C1", charCode: "C1", total: n,
+    { title: "C1 · Gender identity", code: "Sec. C1", charCode: "C1", total: n,
       rows: tally(canonColumn("C1", clients, (c) => c.sex, drift), optionsOf("C1"), false) },
     { title: "C2 · Age", code: "Sec. C2", charCode: "C2", total: n,
       rows: tally(clients.map((c) => ageBandOf(c.dob)), optionsOf("C2"), false) },

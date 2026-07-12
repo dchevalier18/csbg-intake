@@ -112,13 +112,13 @@ export async function runSeed(db: DB): Promise<void> {
 
   // ---------- Answer lists (admin-editable; CSBG 3.0 Section C/D values) ----------
   const lists: Record<string, { label: string; values: string[] }> = {
-    sex:       { label: "Sex (C1)", values: ["Female", "Male"] },
+    sex:       { label: "Gender identity (C1)", values: ["Female", "Male", "Transgender, non-binary, or another gender"] },
     race:      { label: "Race & ethnicity (C6)", values: ["American Indian or Alaska Native", "Asian", "Black or African American", "Hispanic or Latino", "Middle Eastern or North African", "Native Hawaiian / Pacific Islander", "White", "Multiracial or Multiethnic"] },
     edu:       { label: "Education (C3)", values: ["Grades 0-8", "Grades 9-12 / Non-Graduate", "High School Graduate / GED", "12 grade + Some Post-Secondary", "2 or 4 year College Graduate", "Other post-secondary graduate"] },
     work:      { label: "Work status (C8)", values: ["Employed Full-Time", "Employed Part-Time", "Seasonal Farm Worker", "Unemployed (Short-Term)", "Unemployed (Long-Term)", "Unemployed (Not in Labor Force)", "Retired"] },
     insurance: { label: "Health insurance (C5)", values: ["Medicaid", "Medicare", "State Children's Health Insurance Program", "State Health Insurance for Adults", "Military Health Care", "Direct-Purchase", "Employment-Based", "None"] },
     military:  { label: "Military status (C7)", values: ["Veteran", "Active Military", "Never Served in the Military"] },
-    hhType:    { label: "Household type (D9)", values: ["Single Person", "Two Adults no children", "Multiple adults no children", "Single Parent Female", "Single Parent Male", "Two Parent Household", "Non-related Adults with Children", "Multigenerational Household", "Other"] },
+    hhType:    { label: "Household type (D9)", values: ["Single Person", "Two Adults no children", "Multiple adults no children", "Single Parent Female", "Single Parent Male", "Single Parent Non-Binary, Transgender, or Another Gender", "Two Parent Household", "Non-related Adults with Children", "Multigenerational Household", "Other"] },
     housing:   { label: "Housing situation (D11)", values: ["Own", "Rent", "Other permanent housing", "Homeless", "Other"] },
     incomeSrc: { label: "Income sources (D13)", values: ["Employment Only", "Employment and Other Income Source", "Employment, Other Source, and Non-Cash Benefits", "Employment and Non-Cash Benefits", "Other Income Source Only", "Other Income Source and Non-Cash Benefits", "No Income", "Non-Cash Benefits Only"] },
     county:    { label: "County / service area", values: ["Lehigh", "Northampton", "Carbon", "Monroe", "Pike", "Wayne", "Other"] },
@@ -130,7 +130,7 @@ export async function runSeed(db: DB): Promise<void> {
 
   // ---------- Intake form fields (characteristics step) ----------
   await db.insert(t.intakeFields).values([
-    { id: "sex",        label: "Sex",              code: "C1", type: "list",  listKey: "sex",       enabled: 1, builtin: 1, sort: 0 },
+    { id: "sex",        label: "Gender identity",  code: "C1", type: "list",  listKey: "sex",       enabled: 1, builtin: 1, sort: 0 },
     { id: "race",       label: "Race / ethnicity", code: "C6", type: "list",  listKey: "race",      enabled: 1, builtin: 1, sort: 1 },
     { id: "edu",        label: "Education",        code: "C3", type: "list",  listKey: "edu",       enabled: 1, builtin: 1, sort: 2 },
     { id: "work",       label: "Work status",      code: "C8", type: "list",  listKey: "work",      enabled: 1, builtin: 1, sort: 3 },
@@ -143,7 +143,7 @@ export async function runSeed(db: DB): Promise<void> {
       code: "C4", type: "yesno", listKey: null, enabled: 1, builtin: 0, sort: 7 },
   ]);
 
-  // ---------- Service taxonomy (full CSBG 3.0 Module 4 Section A) ----------
+  // ---------- Service taxonomy (full CSBG 3.0 Module 3 Section A) ----------
   await db.insert(t.services).values(SERVICES.map((s, i) => ({
     code: s.code, domain: s.domain, label: s.label, active: 1, sort: i,
   })));
@@ -334,7 +334,7 @@ export async function runSeed(db: DB): Promise<void> {
     actual: 0,
   })));
 
-  // ---------- Outcome log (client-level FNPI recording — feeds Module 4 Section B) ----------
+  // ---------- Outcome log (client-level FNPI recording — feeds Module 3 Section B) ----------
   await db.insert(t.outcomeLog).values([
     { date: "2026-03-18", clientId: "C-2417", code: "FNPI 1b", programId: "cad-a", staffId: "dr", status: "working",  note: "Job-readiness workshop complete; search ongoing." },
     { date: "2026-05-02", clientId: "C-2417", code: "FNPI 5j", programId: "shfb",  staffId: "dr", status: "achieved", note: "Monthly distribution + SNAP enrollment confirmed." },

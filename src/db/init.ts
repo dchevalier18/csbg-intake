@@ -57,7 +57,7 @@ export async function runInit(db: DB): Promise<void> {
 
   // ---------- Canonical answer lists (instrument-exact strings) ----------
   const listDefs: Array<{ key: string; label: string; values: string[] }> = [
-    { key: "sex", label: "Sex (C1)", values: optionsOf("C1") },
+    { key: "sex", label: "Gender identity (C1)", values: optionsOf("C1") },
     { key: "race", label: "Race & ethnicity (C6)", values: optionsOf("C6") },
     { key: "edu", label: "Education (C3)", values: optionsOf("C3") },
     { key: "work", label: "Work status (C8)", values: optionsOf("C8") },
@@ -75,7 +75,7 @@ export async function runInit(db: DB): Promise<void> {
 
   // ---------- Intake question set (Section C characteristics step) ----------
   await db.insert(t.intakeFields).values([
-    { id: "sex",        label: "Sex",              code: "C1", type: "list",  listKey: "sex",       enabled: 1, builtin: 1, sort: 0 },
+    { id: "sex",        label: "Gender identity",  code: "C1", type: "list",  listKey: "sex",       enabled: 1, builtin: 1, sort: 0 },
     { id: "race",       label: "Race / ethnicity", code: "C6", type: "list",  listKey: "race",      enabled: 1, builtin: 1, sort: 1 },
     { id: "edu",        label: "Education",        code: "C3", type: "list",  listKey: "edu",       enabled: 1, builtin: 1, sort: 2 },
     { id: "work",       label: "Work status",      code: "C8", type: "list",  listKey: "work",      enabled: 1, builtin: 1, sort: 3 },
