@@ -66,6 +66,24 @@ CSBG_ALLOW_HTTP=1
 # the embedded database + uploads live here; pre-create so nothing else has to
 New-Item -ItemType Directory -Force -Path "data\pglite" | Out-Null
 
+# --- stop any running server (a live server locks node_modules files) ---
+Step "Stopping any running $AppName server"
+schtasks /End /TN $TaskName 2>$null | Out-Null
+# kill runner loops started outside the task (Startup-folder installs)
+Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" -ErrorAction SilentlyContinue |
+  Where-Object { $_.CommandLine -like "*run-server.ps1*" -and $_.ProcessId -ne $PID } |
+  ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+Start-Sleep -Seconds 1
+# kill whatever holds the port (the next server itself)
+$oldPort = 3100
+if (Test-Path ".env.local") {
+  $pl = Select-String -Path ".env.local" -Pattern "^PORT=" | Select-Object -First 1
+  if ($pl) { $oldPort = [int]$pl.Line.Split("=", 2)[1].Trim() }
+}
+Get-NetTCPConnection -LocalPort $oldPort -State Listen -ErrorAction SilentlyContinue |
+  ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }
+Start-Sleep -Seconds 1
+
 # --- 3. Install + build (stop on failure) ---
 Step "Installing dependencies (this can take a few minutes)"
 npm ci

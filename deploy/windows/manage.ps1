@@ -36,7 +36,13 @@ function Get-ServerUp {
 
 function Stop-Server {
   schtasks /End /TN $TaskName 2>$null | Out-Null
-  # the runner loop + next server are child processes; end anything on our port
+  # kill runner loops started outside the task (Startup-folder installs) so
+  # the crash-restart loop can't respawn the server after we stop it
+  Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" -ErrorAction SilentlyContinue |
+    Where-Object { $_.CommandLine -like "*run-server.ps1*" -and $_.ProcessId -ne $PID } |
+    ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+  Start-Sleep -Seconds 1
+  # then end anything holding our port (the next server itself)
   $port = Get-Port
   Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue |
     ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }
