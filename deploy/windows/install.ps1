@@ -68,7 +68,14 @@ Step "Installing dependencies (this can take a few minutes)"
 npm ci
 if ($LASTEXITCODE -ne 0) { Fail "npm ci exited with code $LASTEXITCODE - fix the errors above and re-run." }
 Step "Building the production server"
+# build-time page data comes from a throwaway in-memory engine — parallel
+# build workers must never open the real on-disk database (process env
+# beats .env.local, so this overrides it for the build only)
+$env:DATABASE_URL = "pglite://memory"
+$env:CSBG_DEMO_SEED = "0"
+$env:NEXT_TELEMETRY_DISABLED = "1"
 npm run build
+Remove-Item Env:DATABASE_URL, Env:CSBG_DEMO_SEED -ErrorAction SilentlyContinue
 if ($LASTEXITCODE -ne 0) { Fail "the build failed (see errors above). Nothing was registered - fix and re-run." }
 
 # --- 4. Autostart: scheduled task, or Startup-folder fallback (no admin needed) ---
