@@ -376,9 +376,19 @@ Section A/B/C rollup for FY26 whose every number is traceable to client/service 
 
 1. **De-CALV**: neutral default theme + fonts (CALV becomes an optional theme package);
    generic demo seed; `logoMode` default `wordmark`.
-2. **First-run setup wizard**: org profile, jurisdiction, first admin (forced password
-   set), FPL confirmation, ceiling policy, program creation from templates — replacing
-   "edit the seed" as the bootstrap path.
+2. **First-run setup wizard**: "Where should this run?" (local vs guided cloud options),
+   **database configuration step** (embedded / connect existing PostgreSQL with
+   test-connection / attach a prior CAP Intake database with auto-backup + migration /
+   restore from backup), org profile, jurisdiction, first admin (forced password set),
+   FPL confirmation, ceiling policy, program creation from templates **or the
+   initial-setup Excel master-data workbook** (programs, services, users, doc types,
+   answer lists — validated on upload) — replacing "edit the seed" as the bootstrap path.
+   (Details: §7.1–7.4.)
+2a. **Local/offline tier**: Windows + Linux installer with embedded database (PGlite
+   behind the same Drizzle layer), auto-start on reboot (service/unit), and the
+   **server manager panel** — start/stop, change port, LAN-reachability toggle, backup
+   folder, update check (§7.2). Functional in Phase 3; signed/polished installers in
+   Phase 4.
 3. **Program types as data**: migrate the static `program-types.ts` catalog into the DB
    so agencies can define program shapes without forking (tool capabilities remain a
    code-level registry the types compose).
@@ -391,8 +401,10 @@ Section A/B/C rollup for FY26 whose every number is traceable to client/service 
    for v1 (matches the container model, keeps the audit story simple); revisit true
    multi-tenancy only if a hosted offering (Phase 5) demands it.
 
-**Exit criterion = v1.0 release**: a stranger agency can `docker compose up`, complete
-the wizard, and run intake→eligibility→services→report without touching code.
+**Exit criterion = v1.0 release**: a stranger agency can either run the local installer
+on an office PC **or** `docker compose up` on a VPS, complete the wizard (database step
+included), and run intake→eligibility→services→report without touching code (§7.11
+acceptance test).
 
 ### Phase 4 — CAA differentiators · ~4–6 weeks
 
@@ -408,6 +420,10 @@ the wizard, and run intake→eligibility→services→report without touching co
    assessment → plan → implementation → results → evaluation cycle.
 5. **Household-centric view**: strengthen household as a first-class aggregate across
    members (whole-family view — the direction ROMA NG and state pilots are moving).
+6. **Import-template builder** (§7.4): generalize the fixed spreadsheet importers into
+   a column-mapping wizard with saved, shareable templates per legacy source — this also
+   lays the groundwork for the Phase 5 CAP60/empowOR/Apricot migration importers.
+7. **Installer polish**: signed Windows/Linux installers, in-panel one-click updates.
 
 ### Phase 5 — Ecosystem & community (ongoing)
 
@@ -431,8 +447,8 @@ the wizard, and run intake→eligibility→services→report without touching co
 ```
 Phase 1  Foundations        LICENSE · tests · CI · migrations · Docker · quick security
 Phase 2  Compliance core    AR 3.0 verify+reconcile · full Section C · FPL national · income worksheet
-Phase 3  v1.0               de-CALV · setup wizard · authz hardening · backups    ⇒ RELEASE
-Phase 4  Differentiators    SmartForm export · Spanish · WCAG AA · ROMA
+Phase 3  v1.0               de-CALV · setup + DB wizard · local installer · master-data workbook · authz · backups  ⇒ RELEASE
+Phase 4  Differentiators    SmartForm export · Spanish · WCAG AA · ROMA · import-template builder
 Phase 5  Ecosystem          importers · HMIS/HSDS · community · sustainability
 ```
 
@@ -448,20 +464,76 @@ must be doable from the web UI or happen automatically; any task that requires S
 editing a config file, or reading a stack trace is a design defect.** This section
 defines the concrete design choices, in dependency order, and maps each to a phase.
 
-### 7.1 Three deployment tiers (agency picks by capacity)
+### 7.1 Four deployment tiers (agency picks by capacity; local/offline is the floor)
 
 | Tier | Who it's for | What it looks like |
 |---|---|---|
+| **Local / offline** | Single office, no cloud budget, unreliable internet, or "start today on the front-desk PC" | A native installer for **Windows and Linux** (download, run, done) that works **fully offline**: bundles the app runtime and an **embedded database**, registers the server to **start automatically on reboot** (Windows service / systemd unit), and installs the **server manager panel** (§7.2). Multi-user works over the office LAN when the operator turns that on. |
 | **Hosted** | Most small/rural agencies (3–10 staff) | Someone else runs it — a sustaining org, a state association, or a commodity "one-click app" host. The agency only ever sees the web UI. This is the long-term answer (§8 governance decision) and the reason the app must stay a boring, stateless, single-container deployment. |
 | **One-command self-host** | Agencies with "the person who set up the Wi-Fi" | `docker compose up -d` on a $6–12/mo VPS or an existing agency VM. One `.env` file created by an interactive `./install.sh` that asks only: domain name, admin email, where to store backups. Compose bundles the app, PostgreSQL, and **Caddy for automatic HTTPS** (Let's Encrypt — no certificate task ever). Only ports 80/443 exposed. |
-| **IT-managed** | State offices, large agencies, county IT | The documented systemd/Postgres/reverse-proxy path (today's `deploy/`), plus Helm/K8s notes if demand appears. Never required for the first two tiers. |
+| **IT-managed** | State offices, large agencies, county IT | The documented systemd/Postgres/reverse-proxy path (today's `deploy/`), plus Helm/K8s notes if demand appears. Never required for the other tiers. |
+
+The first-run wizard's opening step is **"Where should this run?"** — *this computer*
+(local tier, offline-capable) or *a cloud host*, with guided paths for common accessible
+options (DigitalOcean Marketplace droplet, Railway/Render-style one-click, or any VPS +
+`install.sh`) including plain-language cost expectations. Agencies can start local and
+move later: the backup/restore path doubles as the **migrate-to-cloud** path.
 
 Design consequences: **no Redis, no queue, no S3, no email server required** for core
 function (uploads on a mounted volume; SMTP optional and only for nicities); no
 build-time configuration (everything runtime, in Settings); the existing self-bootstrapping
-DB (advisory-lock DDL + auto-seed) is exactly right and must be preserved.
+DB (advisory-lock DDL + auto-seed) is exactly right and must be preserved. One honest
+trade-off is stated up front in the wizard: the **client portal** (and any remote access)
+requires an internet-reachable tier — local installs get everything else.
 
-### 7.2 Nothing to install locally, nothing to configure by hand
+### 7.2 Local server manager panel (the "is it on?" answer)
+
+A small management panel installed with the local tier (tray app or a supervisor's
+localhost-only page — implementation detail, behavior is the contract):
+
+- **Start / stop / restart / status**, and an "Open CAP Intake" button.
+- **Change port** without editing anything.
+- **Network reachability toggle**, in plain language: *"Only this computer"*
+  (bind 127.0.0.1) vs *"Other computers in this office"* (bind LAN + installer-managed
+  firewall rule), with the current addresses staff should type shown as a copyable link.
+- **Start automatically when the computer restarts** (on by default; Windows service /
+  systemd unit managed by the installer).
+- **Backup folder picker** and last-backup age; **check for updates / apply update**.
+
+The embedded-database engine choice makes this tier cheap to build: **PGlite (embedded
+Postgres)** — already exercised by our smoke tests — runs in-process with zero install,
+while server tiers use full PostgreSQL; both sit behind the same Drizzle layer.
+
+### 7.3 Database configuration wizard
+
+A first-run (and Settings-reachable) database step with four plain-language choices:
+
+1. **"Just store it on this computer"** — embedded database, the local-tier default.
+2. **"Connect to an existing PostgreSQL server"** — host/port/database/user fields, a
+   **Test connection** button, and errors translated to actions ("the server refused the
+   password" not `FATAL 28P01`).
+3. **"Attach a previously created CAP Intake database"** — point at an existing
+   database (or take over one restored by IT): the wizard detects its schema version,
+   takes an automatic backup, runs pending migrations, and confirms record counts
+   before switching over.
+4. **"Restore from a backup file"** — upload a backup produced by any tier.
+
+### 7.4 Guided master-data setup and imports
+
+- **Initial-setup Excel workbook**: the wizard offers a downloadable workbook with
+  tabs for **programs, services/catalog mappings, users & roles, document types, answer
+  lists, and FPL ceilings** — fill it in offline (or hand it to the person who knows the
+  programs), upload it, and get row-level plain-language validation before anything is
+  created. Faster than clicking through screens for a real agency's 10+ programs, and
+  the completed workbook doubles as a documented master-data snapshot for auditors.
+- **Import-template builder**: generalize today's fixed spreadsheet importers
+  (`src/lib/import-templates.ts`) into a wizard — upload a sample file from any unique
+  source (legacy system export, state portal download, partner-agency spreadsheet), map
+  its columns to fields with suggested matches, preview validated rows, and save the
+  mapping as a **named, reusable template** for monthly/quarterly re-runs. Templates
+  export as files so agencies leaving the same legacy vendor can share them.
+
+### 7.5 Nothing to configure by hand
 
 - **Browser-only administration** — already largely true (org, programs, users, FPL,
   forms, service catalogs all live in Settings). The Phase 3 **first-run setup wizard**
@@ -476,7 +548,7 @@ DB (advisory-lock DDL + auto-seed) is exactly right and must be preserved.
   that pre-fill type, doc checklist, service mappings, and FPL ceiling, so configuration
   is recognition, not construction.
 
-### 7.3 Updates that cannot strand an agency
+### 7.6 Updates that cannot strand an agency
 
 - **In-app update banner**: the app checks the release feed (opt-out) and shows
   "v1.4 available — release notes" to admins. Updating is `docker compose pull && docker
@@ -491,7 +563,7 @@ DB (advisory-lock DDL + auto-seed) is exactly right and must be preserved.
   rows; your reports update automatically"). The versioned catalog (Phase 2 §6.2)
   makes this a data migration, not a manual re-mapping task.
 
-### 7.4 Backups an auditor would accept, run by no one
+### 7.7 Backups an auditor would accept, run by no one
 
 - **Automatic scheduled backups** ship enabled in the default compose (nightly
   `pg_dump` + uploads snapshot, 30-day retention on the backup volume) — not a task the
@@ -503,7 +575,7 @@ DB (advisory-lock DDL + auto-seed) is exactly right and must be preserved.
   a backup file; the admin guide walks through rehearsing it annually (this doubles as
   the state-monitor/audit answer for data safety).
 
-### 7.5 When something goes wrong, the app explains itself
+### 7.8 When something goes wrong, the app explains itself
 
 - **Health dashboard** in Settings: database reachable, disk space, backup age, TLS
   expiry, version — each with a green/amber/red state and a "what to do" sentence.
@@ -515,7 +587,7 @@ DB (advisory-lock DDL + auto-seed) is exactly right and must be preserved.
   to a forum post or support email — the difference between a fixable report and
   "it's broken."
 
-### 7.6 Secure by default, with zero security decisions delegated to the operator
+### 7.9 Secure by default, with zero security decisions delegated to the operator
 
 TLS automatic (Caddy), security headers and login rate-limiting always on, forced strong
 admin password at setup, optional TOTP for admin roles, sessions and audit retention
@@ -523,7 +595,7 @@ with sane defaults, backups encrypted at rest when offsite. The operator is neve
 a question they'd need a security background to answer. (Hardening items from Phases 1
 and 3 are what make this claim true.)
 
-### 7.7 Documentation and support written for the actual operator
+### 7.10 Documentation and support written for the actual operator
 
 - **Task-oriented admin guide** ("Add a staff member," "Publish the new poverty
   guidelines," "Run the year-end report," "Restore from a backup") with screenshots —
@@ -534,24 +606,31 @@ and 3 are what make this claim true.)
 - Community forum + published office hours; paid implementation partners listed
   neutrally (the empowOR/CiviCRM pattern) for agencies that want hands.
 
-### 7.8 The acceptance test that keeps us honest
+### 7.11 The acceptance test that keeps us honest
 
-Before v1.0 ships: **a non-technical CAA staff member, given only the quick-start guide
-and a fresh VPS login, must reach a working system — installed, wizard completed, one
-intake processed, one report exported — without contacting a developer.** Repeat the
-drill for "apply an update" and "restore a backup." If any step fails, the step (not the
-tester) is the bug.
+Before v1.0 ships, run the drill both ways: **a non-technical CAA staff member, given
+only the quick-start guide and either (a) an ordinary Windows office PC with no internet
+beyond the download or (b) a fresh VPS login, must reach a working system — installed,
+wizard completed (database step included), one intake processed, one report exported —
+without contacting a developer.** Repeat for "apply an update," "restore a backup," and
+"make it reachable from the front-desk computer" (local tier). If any step fails, the
+step (not the tester) is the bug.
 
 ### Phase mapping
 
 | Design choice | Phase |
 |---|---|
 | Compose + Caddy auto-TLS, `install.sh`, no-extra-services rule | 1 |
+| Embedded-database (PGlite) runtime mode behind the same Drizzle layer | 1 (groundwork with the migrations work) |
 | Secure defaults (headers, rate limit, strong passwords) | 1 & 3 |
-| Setup wizard, program templates, backup/restore UI, health dashboard, update banner, auto pre-migration backup | 3 |
+| Setup wizard incl. "Where should this run?" + database configuration wizard (connect/attach/restore) | 3 |
+| Initial-setup Excel master-data workbook | 3 |
+| Local installer (Windows/Linux), server manager panel, auto-start service, LAN toggle | 3 (functional) → 4 (signed installers, polish) |
+| Program templates, backup/restore UI, health dashboard, update banner, auto pre-migration backup | 3 |
 | Guided FPL annual update flow | 2 (data) + 3 (UI) |
 | Friendly failure pages, log viewer, support bundle | 3 |
-| Task-oriented admin guide, contextual help, quick-start + acceptance test | 3 (release gate) |
+| Task-oriented admin guide, contextual help, quick-start + two-path acceptance test | 3 (release gate) |
+| Import-template builder (generalized importers, shareable templates) | 4 |
 | One-click hosts / marketplace packaging (Cloudron, PikaPods, DO Marketplace), forum, partners | 5 |
 | Hosted tier | 5 (governance decision §8) |
 
