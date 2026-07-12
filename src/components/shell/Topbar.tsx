@@ -3,8 +3,31 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { I } from "@/components/icons";
 import { Avatar } from "@/components/ui";
+import { useLang, pick, LANGS, type Lang } from "@/lib/i18n";
+import { setMyLocale } from "@/app-actions/locale";
 
-export interface TopbarUser { name: string; role: string; initials: string }
+export interface TopbarUser { name: string; role: string; initials: string; locale: string }
+
+const STR = {
+  en: {
+    searchPlaceholder: "Search clients by name, ID, or phone…",
+    signedInAs: "Signed in as",
+    security: "Security",
+    securitySub: "Two-step verification & signed-in devices",
+    signOut: "Sign out",
+    signOutSub: "Switch users from the sign-in screen",
+    language: "Language",
+  },
+  es: {
+    searchPlaceholder: "Busca clientes por nombre, ID o teléfono…",
+    signedInAs: "Sesión iniciada como",
+    security: "Seguridad",
+    securitySub: "Verificación en dos pasos y dispositivos",
+    signOut: "Cerrar sesión",
+    signOutSub: "Cambia de usuario desde la pantalla de inicio",
+    language: "Idioma",
+  },
+};
 interface SearchHit { id: string; name: string; sub: string; initial: string }
 
 export function Topbar({ user, fyLabel, onSignOut }: {
@@ -13,6 +36,8 @@ export function Topbar({ user, fyLabel, onSignOut }: {
   onSignOut: () => Promise<void>;
 }) {
   const router = useRouter();
+  const lang = useLang();
+  const s = pick(lang, STR);
   const [q, setQ] = useState("");
   const [results, setResults] = useState<SearchHit[]>([]);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -43,7 +68,7 @@ export function Topbar({ user, fyLabel, onSignOut }: {
       <div className="search">
         <I name="search" size={15} />
         <input
-          placeholder="Search clients by name, ID, or phone…"
+          placeholder={s.searchPlaceholder}
           value={q}
           onChange={(e) => setQ(e.target.value)}
         />
@@ -75,14 +100,26 @@ export function Topbar({ user, fyLabel, onSignOut }: {
           </button>
           {menuOpen ? (
             <div className="user-menu">
-              <div className="user-menu-head">Signed in as {user.name}</div>
+              <div className="user-menu-head">{s.signedInAs} {user.name}</div>
+              <div style={{ display: "flex", gap: 6, alignItems: "center", padding: "8px 12px", fontSize: 12 }}>
+                <span style={{ color: "var(--calv-slate-65)", flex: 1 }}>{s.language}</span>
+                {LANGS.map((l) => (
+                  <button
+                    key={l.id}
+                    type="button"
+                    onClick={() => { void setMyLocale(l.id as Lang); }}
+                    className={"calv-btn calv-btn--sm " + (lang === l.id ? "calv-btn--primary" : "calv-btn--quiet")}
+                    style={{ padding: "3px 10px" }}
+                  >{l.label}</button>
+                ))}
+              </div>
               <button type="button" onClick={() => { setMenuOpen(false); router.push("/security"); }}>
                 <I name="shield" size={15} style={{ color: "var(--calv-slate-65)" }} />
-                <span style={{ flex: 1, textAlign: "left" }}>Security<span style={{ color: "var(--calv-slate-65)", display: "block", fontSize: 11 }}>Two-step verification & signed-in devices</span></span>
+                <span style={{ flex: 1, textAlign: "left" }}>{s.security}<span style={{ color: "var(--calv-slate-65)", display: "block", fontSize: 11 }}>{s.securitySub}</span></span>
               </button>
               <button type="button" onClick={() => { setMenuOpen(false); void onSignOut(); }}>
                 <I name="logout" size={15} style={{ color: "var(--calv-slate-65)" }} />
-                <span style={{ flex: 1, textAlign: "left" }}>Sign out<span style={{ color: "var(--calv-slate-65)", display: "block", fontSize: 11 }}>Switch users from the sign-in screen</span></span>
+                <span style={{ flex: 1, textAlign: "left" }}>{s.signOut}<span style={{ color: "var(--calv-slate-65)", display: "block", fontSize: 11 }}>{s.signOutSub}</span></span>
               </button>
             </div>
           ) : null}

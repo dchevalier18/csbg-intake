@@ -61,6 +61,7 @@ export const users = pgTable("users", {
   totpSecret: text("totp_secret"),
   totpEnabled: integer("totp_enabled").notNull().default(0),
   recoveryCodes: jsonb("recovery_codes").$type<string[]>().notNull().default([]),
+  locale: text("locale").notNull().default("en"), // staff UI language: 'en' | 'es'
 });
 
 export const userPrograms = pgTable("user_programs", {
