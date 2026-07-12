@@ -150,7 +150,7 @@ project rather than a repo.
 - **Naming note**: a zero-star PHP repo named `filmdc/capintake` ("open-source client
   intake for CAAs," created March 2026) already exists on GitHub. Before public launch
   we should pick and check a distinct name (e.g., "CAP Intake" as a brand with a
-  distinct repo/package name) — flagged as an open decision in §7.
+  distinct repo/package name) — flagged as an open decision in §8.
 
 ---
 
@@ -318,7 +318,7 @@ sandbox could not fetch acf.gov/aspe.hhs.gov directly):
 ### Phase 1 — Open-source foundations (blockers) · ~2–3 weeks of work
 
 1. **License**: adopt one (recommendation: **AGPL-3.0** to keep hosted forks open, or
-   **Apache-2.0** for maximum adoption — decision §7). Add LICENSE, `package.json`
+   **Apache-2.0** for maximum adoption — decision §8). Add LICENSE, `package.json`
    license field, copyright headers policy, and a `NOTICE` for the SheetJS (Apache-2.0)
    dependency; move `xlsx` off the CDN tarball to a pinned, verifiable source.
 2. **Truthful docs**: fix README (PostgreSQL, not SQLite), add ARCHITECTURE.md,
@@ -418,7 +418,7 @@ the wizard, and run intake→eligibility→services→report without touching co
 3. **Community infrastructure**: public repo, issue templates, discussion forum,
    versioned release notes tracking ACF DCLs (the "compliance maintenance cadence" is a
    feature — publish a compliance changelog per federal revision).
-4. **Sustainability model** (decision §7): options — (a) CALV/CACLV stewards the project
+4. **Sustainability model** (decision §8): options — (a) CALV/CACLV stewards the project
    and offers paid implementation; (b) agency co-op governance (the empowOR origin
    pattern); (c) fiscal sponsor + hosted SaaS at empowOR-ish pricing (~$1.5–3k/yr) to
    fund maintenance. Conference presence (NCAP, NASCSP, state associations) is how this
@@ -440,7 +440,124 @@ Phases 1 and 2 can run partly in parallel (different files); Phase 3 depends on 
 
 ---
 
-## 7. Open decisions (need your call before implementation)
+## 7. Design for low-IT-capacity agencies (deploy & manage without an IT department)
+
+Most CAAs have no dedicated IT staff — a program manager or data admin doubles as the
+"system administrator." The design rule that follows from this: **every operational task
+must be doable from the web UI or happen automatically; any task that requires SSH,
+editing a config file, or reading a stack trace is a design defect.** This section
+defines the concrete design choices, in dependency order, and maps each to a phase.
+
+### 7.1 Three deployment tiers (agency picks by capacity)
+
+| Tier | Who it's for | What it looks like |
+|---|---|---|
+| **Hosted** | Most small/rural agencies (3–10 staff) | Someone else runs it — a sustaining org, a state association, or a commodity "one-click app" host. The agency only ever sees the web UI. This is the long-term answer (§8 governance decision) and the reason the app must stay a boring, stateless, single-container deployment. |
+| **One-command self-host** | Agencies with "the person who set up the Wi-Fi" | `docker compose up -d` on a $6–12/mo VPS or an existing agency VM. One `.env` file created by an interactive `./install.sh` that asks only: domain name, admin email, where to store backups. Compose bundles the app, PostgreSQL, and **Caddy for automatic HTTPS** (Let's Encrypt — no certificate task ever). Only ports 80/443 exposed. |
+| **IT-managed** | State offices, large agencies, county IT | The documented systemd/Postgres/reverse-proxy path (today's `deploy/`), plus Helm/K8s notes if demand appears. Never required for the first two tiers. |
+
+Design consequences: **no Redis, no queue, no S3, no email server required** for core
+function (uploads on a mounted volume; SMTP optional and only for nicities); no
+build-time configuration (everything runtime, in Settings); the existing self-bootstrapping
+DB (advisory-lock DDL + auto-seed) is exactly right and must be preserved.
+
+### 7.2 Nothing to install locally, nothing to configure by hand
+
+- **Browser-only administration** — already largely true (org, programs, users, FPL,
+  forms, service catalogs all live in Settings). The Phase 3 **first-run setup wizard**
+  closes the last gap: no one edits a seed file to onboard an agency.
+- **Guided annual FPL update**: each January the project publishes the new HHS
+  guidelines as signed data in a release; the app shows a banner ("2027 poverty
+  guidelines are available — review and publish") and the admin publishes them from
+  Settings in two clicks, with the existing pinning rules protecting prior
+  determinations. No CSV wrangling, no math.
+- **Program templates**: new programs are created from named templates (utility
+  assistance, weatherization, food pantry, housing counseling, Head Start-adjacent…)
+  that pre-fill type, doc checklist, service mappings, and FPL ceiling, so configuration
+  is recognition, not construction.
+
+### 7.3 Updates that cannot strand an agency
+
+- **In-app update banner**: the app checks the release feed (opt-out) and shows
+  "v1.4 available — release notes" to admins. Updating is `docker compose pull && docker
+  compose up -d` (documented as the one command to run, or push-button on hosted/managed
+  tiers).
+- **Migrations run automatically on boot**, expand-contract style (never destructive in
+  the same release that stops writing a column), with an **automatic pre-migration
+  backup** taken before any schema change. A failed migration rolls back and the app
+  boots the old version rather than a white screen.
+- **Compliance releases are labeled**: when ACF revises the Annual Report, the release
+  notes say what changed in plain language ("Annual Report 3.1: two new income-source
+  rows; your reports update automatically"). The versioned catalog (Phase 2 §6.2)
+  makes this a data migration, not a manual re-mapping task.
+
+### 7.4 Backups an auditor would accept, run by no one
+
+- **Automatic scheduled backups** ship enabled in the default compose (nightly
+  `pg_dump` + uploads snapshot, 30-day retention on the backup volume) — not a task the
+  agency sets up.
+- **Settings → Backups UI**: last-backup age (with a red banner when stale), one-click
+  download, one-click **restore** with typed confirmation, and optional encrypted
+  offsite copy (S3-compatible bucket) configured with two fields.
+- Documented **disaster-recovery drill**: a single command restores a fresh server from
+  a backup file; the admin guide walks through rehearsing it annually (this doubles as
+  the state-monitor/audit answer for data safety).
+
+### 7.5 When something goes wrong, the app explains itself
+
+- **Health dashboard** in Settings: database reachable, disk space, backup age, TLS
+  expiry, version — each with a green/amber/red state and a "what to do" sentence.
+- **Friendly failure pages**: known failure modes (database down, disk full, misconfigured
+  domain) render instructions a non-technical person can follow — not stack traces.
+- **Admin log viewer**: filtered application events in the UI, so "check the logs" never
+  means SSH.
+- **One-click support bundle**: exports redacted logs + config + version for attaching
+  to a forum post or support email — the difference between a fixable report and
+  "it's broken."
+
+### 7.6 Secure by default, with zero security decisions delegated to the operator
+
+TLS automatic (Caddy), security headers and login rate-limiting always on, forced strong
+admin password at setup, optional TOTP for admin roles, sessions and audit retention
+with sane defaults, backups encrypted at rest when offsite. The operator is never asked
+a question they'd need a security background to answer. (Hardening items from Phases 1
+and 3 are what make this claim true.)
+
+### 7.7 Documentation and support written for the actual operator
+
+- **Task-oriented admin guide** ("Add a staff member," "Publish the new poverty
+  guidelines," "Run the year-end report," "Restore from a backup") with screenshots —
+  organized by task, not by feature.
+- **In-app contextual help** on every Settings page, using CSBG vocabulary
+  (a glossary maps app terms to Annual Report terms).
+- **Quick-start that fits on two pages** and is validated by the acceptance test below.
+- Community forum + published office hours; paid implementation partners listed
+  neutrally (the empowOR/CiviCRM pattern) for agencies that want hands.
+
+### 7.8 The acceptance test that keeps us honest
+
+Before v1.0 ships: **a non-technical CAA staff member, given only the quick-start guide
+and a fresh VPS login, must reach a working system — installed, wizard completed, one
+intake processed, one report exported — without contacting a developer.** Repeat the
+drill for "apply an update" and "restore a backup." If any step fails, the step (not the
+tester) is the bug.
+
+### Phase mapping
+
+| Design choice | Phase |
+|---|---|
+| Compose + Caddy auto-TLS, `install.sh`, no-extra-services rule | 1 |
+| Secure defaults (headers, rate limit, strong passwords) | 1 & 3 |
+| Setup wizard, program templates, backup/restore UI, health dashboard, update banner, auto pre-migration backup | 3 |
+| Guided FPL annual update flow | 2 (data) + 3 (UI) |
+| Friendly failure pages, log viewer, support bundle | 3 |
+| Task-oriented admin guide, contextual help, quick-start + acceptance test | 3 (release gate) |
+| One-click hosts / marketplace packaging (Cloudron, PikaPods, DO Marketplace), forum, partners | 5 |
+| Hosted tier | 5 (governance decision §8) |
+
+---
+
+## 8. Open decisions (need your call before implementation)
 
 1. **License**: AGPL-3.0 (protects against closed hosted forks; some agencies/vendors
    shy away) vs Apache-2.0/MIT (maximum adoption; a vendor could commercialize a closed
@@ -456,7 +573,7 @@ Phases 1 and 2 can run partly in parallel (different files); Phase 3 depends on 
 
 ---
 
-## 8. Research sources
+## 9. Research sources
 
 **Federal requirements**: ACF-OCS DCL-25-06 (AR 3.0 update), DCL-24-09 (3.0 revisions),
 AT-26-02 (FY25 submission on 2.1), DCL-25-02 (FQAR); CSBG Annual Report 3.0 OMB-approved
