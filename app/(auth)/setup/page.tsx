@@ -5,6 +5,10 @@ import { SetupForm } from "./setup-form";
 
 export const metadata = { title: "Set up · CAP Trellis" };
 
+// queries live install state (users table) — never prerender; the build's
+// throwaway in-memory database must not bake this page's data
+export const dynamic = "force-dynamic";
+
 /* First-run setup wizard — reachable ONLY while the install has no users.
    The moment the first administrator exists this page hard-redirects to
    /login (and the server action re-checks the same invariant). */
