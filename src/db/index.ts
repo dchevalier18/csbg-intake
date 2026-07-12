@@ -119,7 +119,15 @@ function createPgConn(): Conn {
 /* ---------- Embedded (PGlite) ---------- */
 
 function createPgliteConn(): Conn {
-  const dir = DATABASE_URL.slice("pglite://".length);
+  let dir = DATABASE_URL.slice("pglite://".length);
+  // `next build` prerenders pages from PARALLEL worker processes; several
+  // engines opening one on-disk data dir at once aborts the WASM runtime
+  // (and would seed the real database as a build side effect). Build-time
+  // page data always comes from a throwaway in-memory engine instead —
+  // the same thing the Docker build does explicitly.
+  if (process.env.NEXT_PHASE === "phase-production-build") {
+    dir = "memory";
+  }
   // PGlite's own mkdir is NOT recursive — a nested data dir (./data/pglite)
   // fails with ENOENT unless the parents exist. Create the full path first.
   if (dir && dir !== "memory") {
