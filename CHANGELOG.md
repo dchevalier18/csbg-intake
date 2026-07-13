@@ -6,6 +6,14 @@ tracks a federal instrument or guideline revision) are marked **[compliance]**
 
 ## Unreleased — 0.5.0 (roadmap Phases 1–5)
 
+### Import wizard: downloadable blank templates
+- Every import option (Client migration, Pantry member agencies, Pantry
+  aggregates, Seminar sign-ins, Volunteer hours) offers a blank CSV download
+  from the wizard's template picker: the exact header row (auto-maps on
+  upload) plus one example row showing every field's format. The example row
+  is engineered to be skipped with a visible reason if staff forget to delete
+  it — its match field can never match real data.
+
 ### Program tools become manageable (post-Phase 5)
 Every program-type tool can now create and manage its own records instead of
 only displaying seeded data:
