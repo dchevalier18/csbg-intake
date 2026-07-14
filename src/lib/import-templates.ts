@@ -14,6 +14,11 @@ export interface ImportField {
   hint: string;          // shown under the mapping select
   aliases: string[];     // header spellings auto-matched on upload
   example: string;       // downloadable-template example-row value
+  /* When a field has no matching column, the client-migration import lets you
+     set one fixed value for the whole file. `fixed` picks the widget:
+     "program" = program dropdown, "year" = FPL-schedule-year dropdown,
+     "text" (default) = free text. Only surfaced for the clients template. */
+  fixed?: "text" | "program" | "year";
 }
 
 export interface ImportTemplate {
@@ -44,7 +49,7 @@ export const IMPORT_TEMPLATES: ImportTemplate[] = [
       { key: "dob", label: "Date of birth", required: true, hint: "2001-05-14 or 5/14/2001",
         aliases: ["dob", "date of birth", "birth date", "birthdate", "born"], example: "2001-05-14" },
       { key: "program", label: "Program", required: true, hint: "Program name or id to enroll into",
-        aliases: ["program", "program id", "program name", "enrolled program"], example: SENTINEL },
+        aliases: ["program", "program id", "program name", "enrolled program"], example: SENTINEL, fixed: "program" },
       { key: "income", label: "Annual income ($)", required: false, hint: "Gross household income",
         aliases: ["income", "annual income", "household income", "gross income", "yearly income"], example: "18500" },
       { key: "hhSize", label: "Household size", required: false, hint: "Defaults to 1",
@@ -63,6 +68,10 @@ export const IMPORT_TEMPLATES: ImportTemplate[] = [
         aliases: ["housing", "housing status", "housing situation", "tenure"], example: "Rent" },
       { key: "hhType", label: "Household type (D9)", required: false, hint: "Instrument answer or close variant",
         aliases: ["hh type", "hhtype", "household type", "family type"], example: "Single Parent Female" },
+      { key: "fplYear", label: "Poverty-guideline year", required: false,
+        hint: "Year income was assessed — must match a configured FPL schedule. Blank uses the active schedule.",
+        aliases: ["fpl year", "poverty year", "guideline year", "poverty guideline year", "assessment year", "fpl"],
+        example: "2025", fixed: "year" },
     ],
   },
   {

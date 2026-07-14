@@ -2,13 +2,14 @@
 /* Data & integrations — admin-only. Integration cards + matching stats, plus the
    spreadsheet import wizard (template → upload → map columns → results). */
 import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { Chip, Empty, Field, Notice, PageHead, Panel } from "@/components/ui";
 import { Modal } from "@/components/ui-client";
 import { I } from "@/components/icons";
 import { useToast } from "@/components/toast";
 import { fmt } from "@/lib/format";
-import { IMPORT_TEMPLATES, autoMapColumns, importTemplate, templateCsv, type ImportTemplate } from "@/lib/import-templates";
-import { parseImportFile, commitImport, type ImportSummary } from "./actions";
+import { IMPORT_TEMPLATES, autoMapColumns, importTemplate, templateCsv, type ImportTemplate, type ImportField } from "@/lib/import-templates";
+import { parseImportFile, commitImport, undoImport, type ImportSummary } from "./actions";
 
 export interface IntegrationRow {
   id: string;
@@ -36,18 +37,37 @@ export interface ImportJobRow {
   updated: number;
   skipped: number;
   staffInitials: string;
+  canUndo: boolean;
 }
 
 const tone: Record<string, string> = { connected: "sage", attention: "amber", ready: "teal" };
 const label: Record<string, string> = { connected: "Connected", attention: "Needs attention", ready: "Ready" };
 
-export function DataClient({ integrations, matching, importJobs }: {
+export interface ProgramOption { id: string; short: string; name: string; }
+
+export function DataClient({ integrations, matching, importJobs, programs, fplYears }: {
   integrations: IntegrationRow[];
   matching: MatchingStats;
   importJobs: ImportJobRow[];
+  programs: ProgramOption[];
+  fplYears: number[];
 }) {
   const toast = useToast();
+  const router = useRouter();
   const [wizardOpen, setWizardOpen] = useState(false);
+  const [undoJob, setUndoJob] = useState<ImportJobRow | null>(null);
+  const [undoPending, startUndo] = useTransition();
+
+  function confirmUndo() {
+    if (!undoJob) return;
+    const job = undoJob;
+    startUndo(async () => {
+      const res = await undoImport(job.id);
+      toast(res.message);
+      setUndoJob(null);
+      if (res.ok) router.refresh();
+    });
+  }
 
   return (
     <div>
@@ -108,7 +128,7 @@ export function DataClient({ integrations, matching, importJobs }: {
           <Empty padding={20}>No spreadsheet imports yet — run one with the button above.</Empty>
         ) : (
           <table className="data">
-            <thead><tr><th>Date</th><th>Template</th><th>File</th><th className="num">Added</th><th className="num">Updated</th><th className="num">Skipped</th><th>By</th></tr></thead>
+            <thead><tr><th>Date</th><th>Template</th><th>File</th><th className="num">Added</th><th className="num">Updated</th><th className="num">Skipped</th><th>By</th><th></th></tr></thead>
             <tbody>
               {importJobs.map((j) => (
                 <tr key={j.id}>
@@ -119,6 +139,11 @@ export function DataClient({ integrations, matching, importJobs }: {
                   <td className="num">{fmt(j.updated)}</td>
                   <td className="num">{j.skipped > 0 ? <Chip tone="amber">{fmt(j.skipped)}</Chip> : "0"}</td>
                   <td>{j.staffInitials}</td>
+                  <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                    {j.canUndo ? (
+                      <button className="calv-btn calv-btn--quiet calv-btn--sm" onClick={() => setUndoJob(j)}>Undo</button>
+                    ) : null}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -135,8 +160,67 @@ export function DataClient({ integrations, matching, importJobs }: {
         </div>
       </Panel>
 
-      {wizardOpen ? <ImportWizard onClose={() => setWizardOpen(false)} toast={toast} /> : null}
+      {wizardOpen ? <ImportWizard onClose={() => setWizardOpen(false)} toast={toast} programs={programs} fplYears={fplYears} /> : null}
+
+      {undoJob ? (
+        <Modal title="Undo this import?" width={460} onClose={() => { if (!undoPending) setUndoJob(null); }}>
+          <p style={{ fontSize: 13, color: "var(--calv-slate)", margin: "0 0 8px", lineHeight: 1.5 }}>
+            This permanently removes the <strong>{fmt(undoJob.imported)}</strong> client{undoJob.imported === 1 ? "" : "s"} added by{" "}
+            <strong>{undoJob.filename}</strong>, along with their program enrollments and any services logged to them.
+          </p>
+          <p style={{ fontSize: 12.5, color: "var(--calv-slate-65)", margin: 0, lineHeight: 1.5 }}>
+            Clients added or imported separately aren&rsquo;t affected. This can&rsquo;t be reversed.
+          </p>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 18 }}>
+            <button className="calv-btn calv-btn--quiet calv-btn--sm" disabled={undoPending} onClick={() => setUndoJob(null)}>Cancel</button>
+            <button
+              className="calv-btn calv-btn--primary calv-btn--sm"
+              disabled={undoPending}
+              style={{ background: "#b3261e", borderColor: "#b3261e" }}
+              onClick={confirmUndo}
+            >
+              {undoPending ? "Removing…" : `Remove ${fmt(undoJob.imported)} client${undoJob.imported === 1 ? "" : "s"}`}
+            </button>
+          </div>
+        </Modal>
+      ) : null}
     </div>
+  );
+}
+
+/* One fixed value applied to every imported row when a field has no column.
+   Program and poverty-year get controlled dropdowns; everything else is text. */
+function FixedValueInput({ field, programs, fplYears, value, onChange }: {
+  field: ImportField;
+  programs: ProgramOption[];
+  fplYears: number[];
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  if (field.fixed === "program") {
+    return (
+      <select value={value} onChange={(e) => onChange(e.target.value)} aria-label={`Set ${field.label} for all rows`}>
+        <option value="">— set a program for all rows —</option>
+        {programs.map((p) => <option key={p.id} value={p.id}>{p.name} ({p.short})</option>)}
+      </select>
+    );
+  }
+  if (field.fixed === "year") {
+    return (
+      <select value={value} onChange={(e) => onChange(e.target.value)} aria-label={`Set ${field.label} for all rows`}>
+        <option value="">— use the active schedule —</option>
+        {fplYears.map((y) => <option key={y} value={String(y)}>{y}</option>)}
+      </select>
+    );
+  }
+  return (
+    <input
+      type="text"
+      value={value}
+      placeholder="…or set one value for every row"
+      onChange={(e) => onChange(e.target.value)}
+      aria-label={`Set ${field.label} for all rows`}
+    />
   );
 }
 
@@ -158,7 +242,9 @@ function downloadTemplate(tp: ImportTemplate) {
 
 type WizardStep = "pick" | "map" | "done";
 
-function ImportWizard({ onClose, toast }: { onClose: () => void; toast: (msg: string) => void }) {
+function ImportWizard({ onClose, toast, programs, fplYears }: {
+  onClose: () => void; toast: (msg: string) => void; programs: ProgramOption[]; fplYears: number[];
+}) {
   const [pending, startTransition] = useTransition();
   const [step, setStep] = useState<WizardStep>("pick");
   const [templateId, setTemplateId] = useState<string>("");
@@ -166,9 +252,13 @@ function ImportWizard({ onClose, toast }: { onClose: () => void; toast: (msg: st
   const [headers, setHeaders] = useState<string[]>([]);
   const [rows, setRows] = useState<string[][]>([]);
   const [mapping, setMapping] = useState<Record<string, number>>({});
+  const [constants, setConstants] = useState<Record<string, string>>({});
   const [result, setResult] = useState<ImportSummary | null>(null);
 
   const tpl: ImportTemplate | undefined = importTemplate(templateId);
+  // Fixed-value assignment (a field with no column takes one value for the whole
+  // file) is only offered on the client-migration template, per product scope.
+  const allowFixed = tpl?.id === "clients";
 
   function pickFile(file: File | undefined) {
     if (!file || !tpl) return;
@@ -189,6 +279,7 @@ function ImportWizard({ onClose, toast }: { onClose: () => void; toast: (msg: st
         setHeaders(res.headers);
         setRows(res.rows);
         setMapping(autoMapColumns(tpl, res.headers));
+        setConstants({});
         setStep("map");
       });
     };
@@ -198,7 +289,7 @@ function ImportWizard({ onClose, toast }: { onClose: () => void; toast: (msg: st
   function runImport() {
     if (!tpl) return;
     startTransition(async () => {
-      const res = await commitImport(tpl.id, filename, mapping, rows);
+      const res = await commitImport(tpl.id, filename, mapping, rows, allowFixed ? constants : {});
       if (!res.ok) {
         toast(res.message);
         return;
@@ -209,8 +300,10 @@ function ImportWizard({ onClose, toast }: { onClose: () => void; toast: (msg: st
     });
   }
 
-  const requiredMapped = tpl ? tpl.fields.every((f) => !f.required || (mapping[f.key] ?? -1) >= 0) : false;
-  const previewFields = tpl ? tpl.fields.filter((f) => (mapping[f.key] ?? -1) >= 0) : [];
+  const hasConst = (key: string) => allowFixed && (constants[key]?.trim().length ?? 0) > 0;
+  const fieldSet = (f: { key: string }) => (mapping[f.key] ?? -1) >= 0 || hasConst(f.key);
+  const requiredMapped = tpl ? tpl.fields.every((f) => !f.required || fieldSet(f)) : false;
+  const previewFields = tpl ? tpl.fields.filter(fieldSet) : [];
 
   return (
     <Modal title="Import a spreadsheet" width={760} onClose={onClose}>
@@ -271,18 +364,47 @@ function ImportWizard({ onClose, toast }: { onClose: () => void; toast: (msg: st
           <p style={{ fontSize: 12.5, color: "var(--calv-slate-65)", margin: "0 0 12px" }}>
             <strong style={{ fontWeight: 600, color: "var(--calv-slate)" }}>{filename}</strong> — {fmt(rows.length)} data row{rows.length === 1 ? "" : "s"}. Match each {tpl.name.toLowerCase()} field to a column.
           </p>
+          {allowFixed ? (
+            <p style={{ fontSize: 11.5, color: "var(--calv-slate-65)", margin: "0 0 10px" }}>
+              No column for a field? Leave it on <em>“No column”</em> and set one value applied to every row —
+              handy when the sheet omits the program or the poverty-guideline year.
+            </p>
+          ) : null}
           <div className="fgrid c3" style={{ marginBottom: 14 }}>
-            {tpl.fields.map((f) => (
-              <Field key={f.key} label={f.label} required={f.required} hint={f.hint}>
-                <select
-                  value={String(mapping[f.key] ?? -1)}
-                  onChange={(e) => setMapping((m) => ({ ...m, [f.key]: Number(e.target.value) }))}
-                >
-                  <option value="-1">— Not mapped —</option>
-                  {headers.map((h, i) => <option key={i} value={String(i)}>{h || `Column ${i + 1}`}</option>)}
-                </select>
-              </Field>
-            ))}
+            {tpl.fields.map((f) => {
+              const mapped = (mapping[f.key] ?? -1) >= 0;
+              return (
+                <Field key={f.key} label={f.label} required={f.required} hint={f.hint}>
+                  <select
+                    value={String(mapping[f.key] ?? -1)}
+                    onChange={(e) => {
+                      const v = Number(e.target.value);
+                      setMapping((m) => ({ ...m, [f.key]: v }));
+                      if (v >= 0) setConstants((c) => { const n = { ...c }; delete n[f.key]; return n; });
+                    }}
+                  >
+                    <option value="-1">{allowFixed ? "— No column —" : "— Not mapped —"}</option>
+                    {headers.map((h, i) => <option key={i} value={String(i)}>{h || `Column ${i + 1}`}</option>)}
+                  </select>
+                  {allowFixed && !mapped ? (
+                    <div style={{ marginTop: 6 }}>
+                      <FixedValueInput
+                        field={f}
+                        programs={programs}
+                        fplYears={fplYears}
+                        value={constants[f.key] ?? ""}
+                        onChange={(val) =>
+                          setConstants((c) => {
+                            const n = { ...c };
+                            if (val) n[f.key] = val; else delete n[f.key];
+                            return n;
+                          })}
+                      />
+                    </div>
+                  ) : null}
+                </Field>
+              );
+            })}
           </div>
           {previewFields.length > 0 ? (
             <div className="compact" style={{ marginBottom: 4 }}>
@@ -291,7 +413,10 @@ function ImportWizard({ onClose, toast }: { onClose: () => void; toast: (msg: st
                 <tbody>
                   {rows.slice(0, 6).map((r, i) => (
                     <tr key={i}>
-                      {previewFields.map((f) => <td key={f.key} style={{ color: "var(--calv-slate-65)" }}>{r[mapping[f.key]] || "—"}</td>)}
+                      {previewFields.map((f) => {
+                    const val = (mapping[f.key] ?? -1) >= 0 ? r[mapping[f.key]] : constants[f.key];
+                    return <td key={f.key} style={{ color: "var(--calv-slate-65)" }}>{val || "—"}</td>;
+                  })}
                     </tr>
                   ))}
                 </tbody>
@@ -300,7 +425,7 @@ function ImportWizard({ onClose, toast }: { onClose: () => void; toast: (msg: st
             </div>
           ) : null}
           <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginTop: 18 }}>
-            <button className="calv-btn calv-btn--quiet calv-btn--sm" onClick={() => { setStep("pick"); setHeaders([]); setRows([]); }}>← Back</button>
+            <button className="calv-btn calv-btn--quiet calv-btn--sm" onClick={() => { setStep("pick"); setHeaders([]); setRows([]); setConstants({}); }}>← Back</button>
             <div style={{ display: "flex", gap: 8 }}>
               <button className="calv-btn calv-btn--quiet calv-btn--sm" onClick={onClose}>Cancel</button>
               <button

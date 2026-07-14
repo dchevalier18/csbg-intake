@@ -3,7 +3,7 @@
    built-in RFC 4180 parser, XLSX via ExcelJS); commit re-validates every row
    against the live tables. Admin-only. */
 import { revalidatePath } from "next/cache";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { readSheet } from "@/lib/spreadsheet";
 import { db, t } from "@/db";
 import { requireAdmin } from "@/lib/auth";
@@ -11,7 +11,7 @@ import { audit, getPrograms } from "@/lib/access";
 import { programType } from "@/lib/program-types";
 import { kvGet, kvSet, nextClientId } from "@/lib/data/core";
 import { importTemplate } from "@/lib/import-templates";
-import { getActiveFpl } from "@/lib/fpl";
+import { getActiveFpl, getFplHistory } from "@/lib/fpl";
 import { canonicalCharacteristic } from "@/lib/csbg-catalog";
 import { fmt, shortDate, todayIso } from "@/lib/format";
 
@@ -108,6 +108,7 @@ export async function commitImport(
   filename: string,
   mapping: Record<string, number>,
   rows: string[][],
+  constants: Record<string, string> = {},
 ): Promise<ImportSummary> {
   const user = await requireAdmin();
 
@@ -115,20 +116,29 @@ export async function commitImport(
   if (!tpl) return fail("Pick an import template first.");
   if (!Array.isArray(rows) || rows.length === 0) return fail("Nothing to import — the file had no data rows.");
   if (rows.length > MAX_ROWS) return fail(`Imports cap at ${fmt(MAX_ROWS)} rows per file.`);
+  const constOf = (key: string): string => String(constants?.[key] ?? "").trim();
   for (const f of tpl.fields) {
-    if (f.required && !(Number.isInteger(mapping[f.key]) && mapping[f.key] >= 0)) {
-      return fail(`Map a column to “${f.label}” before importing.`);
+    const mapped = Number.isInteger(mapping[f.key]) && mapping[f.key] >= 0;
+    if (f.required && !mapped && !constOf(f.key)) {
+      return fail(`Map a column to “${f.label}” — or set a fixed value for it — before importing.`);
     }
   }
 
+  // A field's value comes from its mapped column; a blank cell (or an unmapped
+  // field) falls back to the fixed value set for the whole file, if any.
   const cell = (row: string[], key: string): string => {
     const idx = mapping[key];
-    return Number.isInteger(idx) && idx >= 0 ? String(row[idx] ?? "").trim() : "";
+    if (Number.isInteger(idx) && idx >= 0) {
+      const v = String(row[idx] ?? "").trim();
+      if (v !== "") return v;
+    }
+    return constOf(key);
   };
 
   let imported = 0;
   let updated = 0;
   const errors: string[] = [];
+  const createdClientIds: string[] = []; // tagged with the import job id below → enables undo
   const skip = (rowNo: number, why: string) => errors.push(`Row ${rowNo}: ${why}`);
 
   if (tpl.id === "clients") {
@@ -142,7 +152,8 @@ export async function commitImport(
     }
     const existing = await db.select({ first: t.clients.first, last: t.clients.last, dob: t.clients.dob }).from(t.clients);
     const seen = new Set(existing.map((c) => `${c.first.toLowerCase()}|${c.last.toLowerCase()}|${c.dob}`));
-    const active = await getActiveFpl(); // migrated records pin to the schedule in force at import
+    const active = await getActiveFpl(); // default when a row names no guideline year
+    const scheduleYears = new Set((await getFplHistory()).map((s) => s.year));
     const now = new Date().toISOString();
     const today = todayIso();
     // characteristics canonicalize where possible; unmappable values import
@@ -168,6 +179,18 @@ export async function commitImport(
       const enrolledRaw = cell(row, "enrolled");
       const enrolled = enrolledRaw ? parseDateIso(enrolledRaw) : today;
       if (!enrolled) { skip(rowNo, `enrollment date “${enrolledRaw}” — use a format like 2025-10-12`); continue; }
+      // Poverty-guideline year: from the fplYear column/fixed value if given
+      // (must match a configured schedule), otherwise the active schedule.
+      const fplYearRaw = cell(row, "fplYear");
+      let fplYear = active.year;
+      if (fplYearRaw) {
+        const y = Number(fplYearRaw.replace(/[^0-9]/g, ""));
+        if (!Number.isInteger(y) || !scheduleYears.has(y)) {
+          skip(rowNo, `poverty-guideline year “${fplYearRaw}” isn't a configured FPL schedule`);
+          continue;
+        }
+        fplYear = y;
+      }
 
       const clientId = await nextClientId();
       await db.insert(t.clients).values({
@@ -185,7 +208,7 @@ export async function commitImport(
         income: income !== null && income > 0 ? Math.round(income) : 0,
         caseworkerId: user.id,
         enrolled,
-        fplYear: active.year,
+        fplYear,
         nextFollowUp: null,
         flags: ["Migrated record — verify characteristics"],
         custom: {},
@@ -194,6 +217,7 @@ export async function commitImport(
       });
       await db.insert(t.clientPrograms).values({ clientId, programId });
       seen.add(key);
+      createdClientIds.push(clientId);
       imported++;
     }
   } else if (tpl.id === "pantry-agencies") {
@@ -402,7 +426,7 @@ export async function commitImport(
   }
 
   const skipped = errors.length;
-  await db.insert(t.importJobs).values({
+  const [job] = await db.insert(t.importJobs).values({
     at: new Date().toISOString(),
     template: tpl.id,
     filename,
@@ -411,7 +435,11 @@ export async function commitImport(
     skipped,
     staffId: user.id,
     detail: errors.slice(0, 12).join(" · "),
-  });
+  }).returning({ id: t.importJobs.id });
+  // Tag the rows this client-migration import created so it can be undone later.
+  if (createdClientIds.length > 0) {
+    await db.update(t.clients).set({ importJobId: job.id }).where(inArray(t.clients.id, createdClientIds));
+  }
   if (imported + updated > 0) {
     await db.update(t.integrations).set({ lastSync: shortDate(todayIso()) }).where(eq(t.integrations.id, "sheets"));
   }
@@ -423,4 +451,52 @@ export async function commitImport(
     ? `Import complete — ${fmt(imported)} added and ${fmt(updated)} updated in ${tpl.target}${skipped ? `; ${fmt(skipped)} row${skipped === 1 ? "" : "s"} skipped` : ""}.`
     : `Nothing imported — all ${fmt(skipped)} row${skipped === 1 ? "" : "s"} were skipped. Check the row notes below.`;
   return { ok: true, message, imported, updated, skipped, errors };
+}
+
+export interface UndoResult { ok: boolean; message: string; removed: number; }
+
+/** Reverse a client-migration import: delete the clients it created (tagged with
+    its job id) plus their client-owned rows, and unlink any soft references.
+    Only client-migration imports are reversible — the other importers upsert
+    into shared aggregates, which can't be cleanly un-applied. */
+export async function undoImport(jobId: number): Promise<UndoResult> {
+  const user = await requireAdmin();
+
+  const job = (await db.select().from(t.importJobs).where(eq(t.importJobs.id, jobId)))[0];
+  if (!job) return { ok: false, message: "That import couldn't be found — it may already have been undone.", removed: 0 };
+  if (job.template !== "clients") {
+    return { ok: false, message: "Undo is only available for client-migration imports.", removed: 0 };
+  }
+
+  const targets = await db.select({ id: t.clients.id }).from(t.clients).where(eq(t.clients.importJobId, jobId));
+  const ids = targets.map((c) => c.id);
+  if (ids.length === 0) {
+    await db.delete(t.importJobs).where(eq(t.importJobs.id, jobId));
+    return { ok: true, message: "No client records were linked to that import — the log entry was cleared.", removed: 0 };
+  }
+
+  // Client-owned rows (NOT NULL client_id) — remove outright.
+  await db.delete(t.clientPrograms).where(inArray(t.clientPrograms.clientId, ids));
+  await db.delete(t.serviceLog).where(inArray(t.serviceLog.clientId, ids));
+  await db.delete(t.outcomeLog).where(inArray(t.outcomeLog.clientId, ids));
+  // Independent records that merely reference a client — unlink, don't destroy.
+  await db.update(t.applications).set({ clientId: null }).where(inArray(t.applications.clientId, ids));
+  await db.update(t.loans).set({ clientId: null }).where(inArray(t.loans.clientId, ids));
+  await db.update(t.seminarAttendees).set({ clientId: null }).where(inArray(t.seminarAttendees.clientId, ids));
+  await db.update(t.students).set({ clientId: null }).where(inArray(t.students.clientId, ids));
+  await db.update(t.volunteers).set({ clientId: null }).where(inArray(t.volunteers.clientId, ids));
+  await db.update(t.wxJobs).set({ clientId: null }).where(inArray(t.wxJobs.clientId, ids));
+  // Finally the clients, and the import log entry.
+  await db.delete(t.clients).where(inArray(t.clients.id, ids));
+  await db.delete(t.importJobs).where(eq(t.importJobs.id, jobId));
+
+  await audit(user.id, "data.import.undo", "integration", "sheets",
+    `${job.filename} · ${ids.length} imported client${ids.length === 1 ? "" : "s"} removed`);
+  revalidatePath("/", "layout");
+
+  return {
+    ok: true,
+    removed: ids.length,
+    message: `Import undone — removed ${fmt(ids.length)} imported client${ids.length === 1 ? "" : "s"} and their enrollments.`,
+  };
 }

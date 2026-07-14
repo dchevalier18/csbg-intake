@@ -134,6 +134,7 @@ export const clients = pgTable("clients", {
   custom: jsonb("custom").$type<Record<string, string>>().notNull().default({}),
   status: text("status").notNull().default("active"), // 'active' | 'closed'
   createdAt: text("created_at").notNull(),
+  importJobId: integer("import_job_id"),        // set by the client-migration importer → enables one-click undo
 });
 
 export const clientPrograms = pgTable("client_programs", {
