@@ -5,8 +5,9 @@ import { I } from "@/components/icons";
 import { Avatar } from "@/components/ui";
 import { useLang, pick, LANGS, type Lang } from "@/lib/i18n";
 import { setMyLocale } from "@/app-actions/locale";
+import { setMyUiScale } from "@/app-actions/ui-scale";
 
-export interface TopbarUser { name: string; role: string; initials: string; locale: string }
+export interface TopbarUser { name: string; role: string; initials: string; locale: string; uiScale: number }
 
 const STR = {
   en: {
@@ -17,6 +18,7 @@ const STR = {
     signOut: "Sign out",
     signOutSub: "Switch users from the sign-in screen",
     language: "Language",
+    scale: "Interface size",
   },
   es: {
     searchPlaceholder: "Busca clientes por nombre, ID o teléfono…",
@@ -26,6 +28,7 @@ const STR = {
     signOut: "Cerrar sesión",
     signOutSub: "Cambia de usuario desde la pantalla de inicio",
     language: "Idioma",
+    scale: "Tamaño de la interfaz",
   },
 };
 interface SearchHit { id: string; name: string; sub: string; initial: string }
@@ -112,6 +115,19 @@ export function Topbar({ user, fyLabel, fyRange, onSignOut }: {
                     className={"calv-btn calv-btn--sm " + (lang === l.id ? "calv-btn--primary" : "calv-btn--quiet")}
                     style={{ padding: "3px 10px" }}
                   >{l.label}</button>
+                ))}
+              </div>
+              <div style={{ display: "flex", gap: 6, alignItems: "center", padding: "0 12px 8px", fontSize: 12 }}>
+                <span style={{ color: "var(--calv-slate-65)", flex: 1 }}>{s.scale}</span>
+                {[90, 100, 110, 125].map((sc) => (
+                  <button
+                    key={sc}
+                    type="button"
+                    onClick={() => { void setMyUiScale(sc); }}
+                    className={"calv-btn calv-btn--sm " + (user.uiScale === sc ? "calv-btn--primary" : "calv-btn--quiet")}
+                    style={{ padding: "3px 8px" }}
+                    aria-pressed={user.uiScale === sc}
+                  >{sc}%</button>
                 ))}
               </div>
               <button type="button" onClick={() => { setMenuOpen(false); router.push("/security"); }}>

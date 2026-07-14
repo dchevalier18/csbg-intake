@@ -62,6 +62,7 @@ export const users = pgTable("users", {
   totpEnabled: integer("totp_enabled").notNull().default(0),
   recoveryCodes: jsonb("recovery_codes").$type<string[]>().notNull().default([]),
   locale: text("locale").notNull().default("en"), // staff UI language: 'en' | 'es'
+  uiScale: integer("ui_scale").notNull().default(100), // interface scale %, per user (90–125)
 });
 
 export const userPrograms = pgTable("user_programs", {

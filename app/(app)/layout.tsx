@@ -28,7 +28,9 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     <LangProvider lang={user.locale}>
     <ToastProvider>
       <a href="#main" className="skip-link">Skip to main content</a>
-      <div className="app" style={{ "--brand": org.accent } as CSSProperties}>
+      {/* per-user interface scale: uniform zoom on the app shell (modals and
+          toasts render inline, so they scale with it) */}
+      <div className="app" style={{ "--brand": org.accent, zoom: user.uiScale / 100 } as CSSProperties}>
         <Sidebar
           org={{ name: org.name, short: org.short, logoMode: org.logoMode, logoData: org.logoData }}
           navPrograms={navPrograms.map((p) => ({ id: p.id, short: p.short, color: p.color }))}
@@ -38,7 +40,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
         />
         <main className="content" id="main">
           <Topbar
-            user={{ name: user.name, role: user.role, initials: user.initials, locale: user.locale }}
+            user={{ name: user.name, role: user.role, initials: user.initials, locale: user.locale, uiScale: user.uiScale }}
             fyLabel={fy.label}
             fyRange={fy.shortRange}
             onSignOut={signOut}
