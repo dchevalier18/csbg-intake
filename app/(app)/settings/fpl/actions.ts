@@ -7,7 +7,6 @@ import { audit } from "@/lib/access";
 import { getActiveFpl } from "@/lib/fpl";
 import { officialFpl, JURISDICTIONS, jurisdictionLabel, type Jurisdiction } from "@/lib/fpl-data";
 import { OPEN_STAGES } from "@/lib/data/core";
-import { todayIso } from "@/lib/format";
 
 export interface ActionResult {
   ok: boolean;
@@ -60,8 +59,14 @@ export async function setCsbgCeiling(ceiling: number): Promise<ActionResult> {
   return { ok: true };
 }
 
-export async function publishFpl(year: number, base: number, perAdditional: number): Promise<ActionResult> {
+export async function publishFpl(
+  year: number,
+  base: number,
+  perAdditional: number,
+  opts?: { activate?: boolean; effective?: string },
+): Promise<ActionResult> {
   const admin = await requireAdmin();
+  const activate = opts?.activate ?? true;
   const y = Math.round(Number(year));
   const b = Math.round(Number(base));
   const p = Math.round(Number(perAdditional));
@@ -76,11 +81,22 @@ export async function publishFpl(year: number, base: number, perAdditional: numb
   // warn-don't-block: agencies may publish state-specific figures on purpose
   const official = officialFpl(y, jurisdiction as Jurisdiction);
   const matchesOfficial = official && official.base === b && official.perAdditional === p;
-  await db.update(t.fplSchedules).set({ status: "archived" });
+  // Effective date: explicit > official HHS date > mid-January of the year
+  // (HHS's usual timing). It must fall inside the guideline year — imports and
+  // point-in-time lookups resolve "the schedule in force on a date" from it,
+  // so a backfilled prior year stamped with today's date would shadow the
+  // current schedule.
+  const effective = opts?.effective?.trim() || official?.effective || `${y}-01-15`;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(effective)) return { ok: false, message: "Enter the effective date as YYYY-MM-DD." };
+  if (Number(effective.slice(0, 4)) !== y) {
+    return { ok: false, message: `The effective date should fall in ${y} — date-based lookups key on it.` };
+  }
+  const current = await getActiveFpl();
+  if (activate) await db.update(t.fplSchedules).set({ status: "archived" });
   await db.insert(t.fplSchedules).values({
     year: y, base: b, perAdditional: p,
-    effective: official?.effective ?? todayIso(),
-    status: "active",
+    effective,
+    status: activate ? "active" : "archived",
     jurisdiction,
   });
   const clientCount = (await db.select({ id: t.clients.id }).from(t.clients)).length;
@@ -88,14 +104,16 @@ export async function publishFpl(year: number, base: number, perAdditional: numb
     .filter((a) => (OPEN_STAGES as readonly string[]).includes(a.stage)).length;
   const n = clientCount + openApps;
   await audit(admin.id, "fpl.publish", "fpl", String(y),
-    `Published FPL ${y} (${jurisdictionLabel(jurisdiction)}) — household of 1 $${b}, each additional $${p}; ${n} cases stay pinned`);
+    `Published FPL ${y} (${jurisdictionLabel(jurisdiction)}${activate ? "" : ", archived"}) — household of 1 $${b}, each additional $${p}; ${n} cases stay pinned`);
   revalidatePath("/", "layout");
+  const officialNote = official && !matchesOfficial
+    ? ` Note: the published HHS ${y} table for ${jurisdictionLabel(jurisdiction)} is $${official.base} + $${official.perAdditional} — double-check the figures if that wasn't intentional.`
+    : "";
   return {
     ok: true,
-    message: `FPL ${y} is now active. ${n} existing cases remain pinned to the schedule they were assessed under.` +
-      (official && !matchesOfficial
-        ? ` Note: the published HHS ${y} table for ${jurisdictionLabel(jurisdiction)} is $${official.base} + $${official.perAdditional} — double-check the figures if that wasn't intentional.`
-        : ""),
+    message: activate
+      ? `FPL ${y} is now active. ${n} existing cases remain pinned to the schedule they were assessed under.${officialNote}`
+      : `FPL ${y} added to the guideline history as archived — FPL ${current.year} stays active for new assessments. Prior-year cases and date-based imports can now pin to it.${officialNote}`,
   };
 }
 

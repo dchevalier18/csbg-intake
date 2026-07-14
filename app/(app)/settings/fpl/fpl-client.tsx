@@ -34,6 +34,8 @@ export function FplClient({ history, ceiling: ceilingProp, pinned, jurisdiction:
   const [pYear, setPYear] = useState(String((active?.year ?? 2026) + 1));
   const [pBase, setPBase] = useState(String(active?.base ?? 0));
   const [pPer, setPPer] = useState(String(active?.perAdditional ?? 0));
+  const [pEffective, setPEffective] = useState("");
+  const [pActivate, setPActivate] = useState(true);
   const [prefillNote, setPrefillNote] = useState<string | null>(null);
 
   useEffect(() => {
@@ -52,13 +54,18 @@ export function FplClient({ history, ceiling: ceilingProp, pinned, jurisdiction:
     let cancelled = false;
     const y = Number(pYear);
     if (!Number.isFinite(y)) return;
+    // A prior year is a history backfill — default to publishing it archived,
+    // so the current schedule stays in force for new assessments.
+    setPActivate(y > (active?.year ?? 0));
     officialFplFor(y).then((o) => {
       if (cancelled) return;
       if (o) {
         setPBase(String(o.base));
         setPPer(String(o.perAdditional));
+        setPEffective(o.effective);
         setPrefillNote(`Prefilled from the published HHS ${y} table (${o.label}), effective ${longDate(o.effective)}.`);
       } else {
+        setPEffective(y >= 2000 && y <= 2100 ? `${y}-01-15` : "");
         setPrefillNote(null);
       }
     });
@@ -101,7 +108,7 @@ export function FplClient({ history, ceiling: ceilingProp, pinned, jurisdiction:
   }
 
   async function onPublish() {
-    const res = await publishFpl(Number(pYear), Number(pBase), Number(pPer));
+    const res = await publishFpl(Number(pYear), Number(pBase), Number(pPer), { activate: pActivate, effective: pEffective });
     if (res.ok) setShowPublish(false);
     if (res.message) toast(res.message);
   }
@@ -160,19 +167,33 @@ export function FplClient({ history, ceiling: ceilingProp, pinned, jurisdiction:
       </div>
 
       <Panel title="Guideline history" sub="Every schedule ever configured stays on record. Enrolled and closed cases keep the schedule they were assessed under — publishing a new year never rewrites a prior eligibility determination."
-        right={<button className="calv-btn calv-btn--primary calv-btn--sm" onClick={() => setShowPublish((s) => !s)}><I name="plus" size={13} /> Publish new year</button>}>
+        right={<button className="calv-btn calv-btn--primary calv-btn--sm" onClick={() => setShowPublish((s) => !s)}><I name="plus" size={13} /> Add guideline year</button>}>
         {showPublish ? (
           <div style={{ margin: "4px 0 18px", padding: "14px 16px", background: "var(--calv-sand-15)", border: "1px solid var(--calv-sand-35)", borderRadius: 4 }}>
-            <div className="calv-label" style={{ marginBottom: 10 }}>Publish a new guideline year</div>
-            <div style={{ display: "grid", gridTemplateColumns: "110px 1fr 1fr auto auto", gap: 12, alignItems: "end" }}>
+            <div className="calv-label" style={{ marginBottom: 10 }}>Publish a guideline year</div>
+            <div style={{ display: "grid", gridTemplateColumns: "110px 1fr 1fr 160px", gap: 12, alignItems: "end" }}>
               <Field label="Year"><input type="number" value={pYear} onChange={(e) => setPYear(e.target.value)} /></Field>
               <Field label="Household of 1 (annual $)"><input type="number" step="10" value={pBase} onChange={(e) => setPBase(e.target.value)} /></Field>
               <Field label="Each additional person (+$)"><input type="number" step="10" value={pPer} onChange={(e) => setPPer(e.target.value)} /></Field>
-              <button className="calv-btn calv-btn--primary calv-btn--sm" onClick={onPublish}><I name="check" size={13} /> Publish & activate</button>
-              <button className="calv-btn calv-btn--quiet calv-btn--sm" onClick={() => setShowPublish(false)}>Cancel</button>
+              <Field label="Effective date"><input type="date" value={pEffective} onChange={(e) => setPEffective(e.target.value)} /></Field>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginTop: 12, flexWrap: "wrap" }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, cursor: "pointer" }}>
+                <input type="checkbox" checked={pActivate} onChange={(e) => setPActivate(e.target.checked)} />
+                Make it the active schedule for new assessments
+              </label>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button className="calv-btn calv-btn--quiet calv-btn--sm" onClick={() => setShowPublish(false)}>Cancel</button>
+                <button className="calv-btn calv-btn--primary calv-btn--sm" onClick={onPublish}>
+                  <I name="check" size={13} /> {pActivate ? "Publish & activate" : "Publish to history"}
+                </button>
+              </div>
             </div>
             <p style={{ fontSize: 11.5, color: "var(--calv-slate-65)", margin: "10px 0 0" }}>
-              {prefillNote ?? "No published HHS table for that year ships with this build — enter the Federal Register figures."} The current schedule is archived automatically. New intakes assess against the new year; nothing already assessed is recalculated.
+              {prefillNote ?? "No published HHS table for that year ships with this build — enter the Federal Register figures."}{" "}
+              {pActivate
+                ? "The current schedule is archived automatically. New intakes assess against the new year; nothing already assessed is recalculated."
+                : `FPL ${active.year} stays active — the year lands in the history for prior-year cases and date-based imports. You can activate it later from the table below.`}
             </p>
           </div>
         ) : null}
