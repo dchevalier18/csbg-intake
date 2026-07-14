@@ -8,19 +8,19 @@ import { requireUser } from "@/lib/auth";
 import { audit, userCanSeeProgram, visibleProgramIds } from "@/lib/access";
 import { getEnabledIntakeFields, getOrg, nextApplicationId, programCeiling, requiredDocKeys } from "@/lib/data/core";
 import { getActiveFpl, fplStatusFor } from "@/lib/fpl";
+import { classifyMatches } from "@/lib/matching";
 import { normalizeWorksheet } from "@/lib/income";
 import { todayIso } from "@/lib/format";
 
 export interface DupMatch { id: string; first: string; last: string; dob: string; inScope: boolean }
 
-/** Live duplicate scan. MATCHING is agency-wide (duplicates split service history and
-    inflate unduplicated counts), but identifying details are only returned for records
-    within the caller's assigned programs — out-of-scope matches come back redacted. */
+/** Live duplicate scan — shared engine in @/lib/matching (exact name+DOB plus
+    weaker "possible" signals). MATCHING is agency-wide (duplicates split service
+    history and inflate unduplicated counts), but identifying details are only
+    returned for records within the caller's assigned programs — out-of-scope
+    matches come back redacted. */
 export async function checkDuplicates(first: string, last: string, dob: string): Promise<DupMatch[]> {
   const user = await requireUser();
-  if (first.trim().length < 2 || last.trim().length < 2) return [];
-  const firstPrefix = first.trim().toLowerCase().slice(0, 3);
-  const lastLower = last.trim().toLowerCase();
 
   const memberships = await db.select().from(t.clientPrograms);
   const byClient = new Map<string, string[]>();
@@ -31,18 +31,17 @@ export async function checkDuplicates(first: string, last: string, dob: string):
   }
   const mine = await visibleProgramIds(user);
 
-  return (await db
+  const candidates = await db
     .select({ id: t.clients.id, first: t.clients.first, last: t.clients.last, dob: t.clients.dob })
-    .from(t.clients))
-    .filter((c) =>
-      c.last.toLowerCase() === lastLower &&
-      (c.first.toLowerCase().startsWith(firstPrefix) || c.dob === dob))
-    .map((c) => {
-      const inScope = (byClient.get(c.id) ?? []).some((p) => mine.has(p));
-      return inScope
-        ? { ...c, inScope }
-        : { id: "•••", first: "Existing", last: "record", dob: "•••", inScope };
-    });
+    .from(t.clients);
+  const { exact, possible } = classifyMatches({ first, last, dob }, candidates);
+
+  return [...exact, ...possible.map((m) => m.client)].map((c) => {
+    const inScope = (byClient.get(c.id) ?? []).some((p) => mine.has(p));
+    return inScope
+      ? { id: c.id, first: c.first, last: c.last, dob: c.dob, inScope }
+      : { id: "•••", first: "Existing", last: "record", dob: "•••", inScope };
+  });
 }
 
 export interface IntakePayload {
