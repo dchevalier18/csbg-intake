@@ -13,6 +13,7 @@ import { getProgram, userCanSeeProgram, audit } from "@/lib/access";
 import { getEnabledIntakeFields, requiredDocKeys, applicationDocsVerified, programCeiling, OPEN_STAGES, nextClientId } from "@/lib/data/core";
 import { fplStatusFor, fplSchedule, getActiveFpl, type FplStatus } from "@/lib/fpl";
 import { checkUpload } from "@/lib/uploads";
+import { matchKey } from "@/lib/matching";
 import { localDateOf, shortDate, todayIso } from "@/lib/format";
 import type { Determination } from "@/db/schema";
 
@@ -38,7 +39,13 @@ async function buildDetermination(app: Application, st: FplStatus, ceiling: numb
 export interface ActionResult {
   ok: boolean;
   message: string;
+  /** set when approval found existing client(s) with the same name + DOB —
+      the reviewer chooses: enroll the existing record, or create a separate client */
+  duplicates?: Array<{ id: string; first: string; last: string; dob: string; enrolled: string }>;
 }
+
+/** Reviewer's answer to the approval duplicate prompt. */
+export type DuplicateChoice = { action: "link"; clientId: string } | { action: "separate" };
 
 async function loadApp(id: string): Promise<Application | undefined> {
   return (await db.select().from(t.applications).where(eq(t.applications.id, id)))[0];
@@ -482,7 +489,7 @@ export async function reopenApplication(appId: string, programId: string, note: 
     Cross-enrollment applications (client_id set at creation by the profile's
     "Enroll in program" action) add the program to the EXISTING client record
     instead — one client id, one service history, no duplicate. */
-export async function approveApplication(appId: string): Promise<ActionResult> {
+export async function approveApplication(appId: string, dup?: DuplicateChoice): Promise<ActionResult> {
   const user = await requireUser();
   const app = await loadApp(appId);
   if (!app || !await userCanSeeProgram(user, app.programId) || !(OPEN_STAGES as readonly string[]).includes(app.stage)) {
@@ -501,6 +508,35 @@ export async function approveApplication(appId: string): Promise<ActionResult> {
   const today = todayIso();
   const now = new Date().toISOString();
   const determination = await buildDetermination(app, st, ceiling);
+
+  // ---- final duplicate guard (fresh intakes only) ----
+  // The intake-time warning is advisory; approval is where a duplicate record
+  // would actually be created, so exact name+DOB matches stop here and the
+  // reviewer chooses: enroll the existing record, or confirm a separate person.
+  if (!app.clientId) {
+    const candidates = await db.select({
+      id: t.clients.id, first: t.clients.first, last: t.clients.last,
+      dob: t.clients.dob, enrolled: t.clients.enrolled,
+    }).from(t.clients);
+    const key = matchKey(app);
+    const exact = candidates.filter((c) => matchKey(c) === key);
+    if (exact.length > 0) {
+      if (dup?.action === "link") {
+        if (!exact.some((c) => c.id === dup.clientId)) {
+          return { ok: false, message: "That client isn't an exact match for this application." };
+        }
+        // enroll the existing record — same path as a cross-enrollment application
+        await db.update(t.applications).set({ clientId: dup.clientId }).where(eq(t.applications.id, app.id));
+        app.clientId = dup.clientId;
+      } else if (dup?.action !== "separate") {
+        return {
+          ok: false,
+          message: `${app.first} ${app.last} (${app.dob}) matches ${exact.length === 1 ? `existing client ${exact[0].id}` : `${exact.length} existing clients`} — choose how to proceed.`,
+          duplicates: exact,
+        };
+      }
+    }
+  }
 
   // ---- linked application → enroll the existing client in the program ----
   if (app.clientId) {

@@ -10,7 +10,7 @@ import { money, shortDate } from "@/lib/format";
 import {
   attachApplicationDoc, verifyApplicationDoc, bypassVerifyApplicationDoc,
   undoApplicationDocVerification, sendForDecision, denyApplication, approveApplication,
-  updateApplication, type ApplicationUpdatePayload,
+  updateApplication, type ApplicationUpdatePayload, type DuplicateChoice,
 } from "./actions";
 
 export interface IntakeFieldDef {
@@ -97,6 +97,10 @@ export default function EligibilityClient({ rows, currentUserName, lists, fields
   const toast = useToast();
   const [openId, setOpenId] = useState<string | null>(null);
   const [stageFilter, setStageFilter] = useState("All");
+  const [dupPrompt, setDupPrompt] = useState<{
+    aId: string;
+    matches: Array<{ id: string; first: string; last: string; dob: string; enrolled: string }>;
+  } | null>(null);
   const [, startTransition] = useTransition();
   const open = rows.find((a) => a.id === openId);
 
@@ -139,11 +143,16 @@ export default function EligibilityClient({ rows, currentUserName, lists, fields
       toast(res.message);
     });
   }
-  function decide(aId: string, decision: "approve" | "deny", note?: string) {
+  function decide(aId: string, decision: "approve" | "deny", note?: string, dup?: DuplicateChoice) {
     startTransition(async () => {
-      const res = decision === "approve" ? await approveApplication(aId) : await denyApplication(aId, note ?? "");
+      const res = decision === "approve" ? await approveApplication(aId, dup) : await denyApplication(aId, note ?? "");
+      // exact name+DOB match — surface the reviewer's choice instead of a toast
+      if (!res.ok && res.duplicates?.length) {
+        setDupPrompt({ aId, matches: res.duplicates });
+        return;
+      }
       toast(res.message);
-      if (res.ok) setOpenId(null);
+      if (res.ok) { setDupPrompt(null); setOpenId(null); }
     });
   }
   function save(aId: string, payload: ApplicationUpdatePayload) {
@@ -207,6 +216,34 @@ export default function EligibilityClient({ rows, currentUserName, lists, fields
         <ApplicantModal a={open} currentUserName={currentUserName} onClose={() => setOpenId(null)}
           lists={lists} fields={fields} programs={programs}
           attach={attach} verify={verify} bypass={bypass} undo={undo} decide={decide} advance={advance} save={save} />
+      ) : null}
+
+      {dupPrompt ? (
+        <Modal title="Possible duplicate client" width={520} onClose={() => setDupPrompt(null)}>
+          <p style={{ fontSize: 13, color: "var(--calv-slate)", margin: "0 0 10px", lineHeight: 1.5 }}>
+            This applicant exactly matches {dupPrompt.matches.length === 1 ? "an existing client record" : `${dupPrompt.matches.length} existing client records`} on
+            name and date of birth. Adding the program to the existing record keeps one service history — no duplicate.
+          </p>
+          {dupPrompt.matches.map((m) => (
+            <div key={m.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, padding: "8px 12px", background: "var(--calv-amber-15)", border: "1px solid var(--calv-amber-35)", borderRadius: 4, marginBottom: 6, fontSize: 12.5 }}>
+              <span>
+                <strong style={{ fontWeight: 600 }}>{m.first} {m.last}</strong>{" "}
+                <span style={{ color: "var(--calv-slate-65)" }}>({m.id}) — DOB {m.dob} · enrolled {shortDate(m.enrolled)}</span>
+              </span>
+              <button className="calv-btn calv-btn--secondary calv-btn--sm"
+                onClick={() => decide(dupPrompt.aId, "approve", undefined, { action: "link", clientId: m.id })}>
+                <I name="check" size={13} /> Use this record
+              </button>
+            </div>
+          ))}
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 14 }}>
+            <button className="calv-btn calv-btn--quiet calv-btn--sm" onClick={() => setDupPrompt(null)}>Cancel</button>
+            <button className="calv-btn calv-btn--quiet calv-btn--sm"
+              onClick={() => decide(dupPrompt.aId, "approve", undefined, { action: "separate" })}>
+              Different person — create separate client
+            </button>
+          </div>
+        </Modal>
       ) : null}
     </div>
   );
