@@ -1,4 +1,4 @@
-# Deploy the CSBG intake app to the staging server (host alias "dev" = dchevalier@YOUR_SERVER_IP).
+# Deploy the CSBG intake app to the staging server (host alias "dev" = youruser@YOUR_SERVER_IP).
 # Requires deploy/provision.sh to have been run once on the server.
 # Packs the source (no node_modules/.next/data/.git), ships it over scp, builds on the
 # server as dchevalier, and restarts the systemd service (passwordless via the sudoers

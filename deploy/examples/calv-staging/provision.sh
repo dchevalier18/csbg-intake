@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Provision YOUR_SERVER_IP (Ubuntu, shared box your-server) for the CSBG Client
-# Intake System staging deployment. NON-DESTRUCTIVE to the other apps on this
-# host (app-example-a, app-example-b): adds a new Apache vhost, a new
+# Provision the staging server (Ubuntu, shared box) for the CSBG Client
+# Intake System staging deployment. NON-DESTRUCTIVE to any other apps on this
+# host: adds a new Apache vhost, a new
 # PostgreSQL database + role, and a systemd unit — touches nothing else.
 # PostgreSQL stays localhost-only (no shared-instance restart).
 # Idempotent — safe to re-run:  sudo bash provision.sh

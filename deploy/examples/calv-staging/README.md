@@ -1,11 +1,11 @@
-# Staging deployment — YOUR_SERVER_IP (`your-server`, shared Ubuntu box)
+# Staging deployment — shared Ubuntu box
 
 The app runs as a systemd service (`csbg-intake`, Next.js on `127.0.0.1:3100`,
 **running as the `dchevalier` user**) behind an Apache reverse-proxy vhost on
 port 80. PostgreSQL (already on the box) hosts a dedicated `csbg_intake`
 database, **localhost-only** — the app connects over `localhost`.
 
-This box also hosts other apps (`app-example-a`, `app-example-b`). Everything
+This box also hosts other apps. Everything
 here is **additive and non-destructive**: a new vhost (other sites and
 `000-default` untouched), a new database + role (the shared Postgres instance is
 not reconfigured or restarted), a new systemd unit, and a narrow sudoers rule.
@@ -37,7 +37,7 @@ not reconfigured or restarted), a new systemd unit, and a narrow sudoers rule.
 ## Developing against this database from your workstation
 The staging Postgres is localhost-only, so a dev workstation can't reach it yet.
 To enable it deliberately: open `listen_addresses` + a scoped `pg_hba` rule for
-the YOUR_LAN_CIDR LAN and restart Postgres (**this briefly bounces the shared
+the office LAN and restart Postgres (**this briefly bounces the shared
 instance's other databases**). Ask and it's a one-time change; then point
 `.env.local` `DATABASE_URL` at `postgres://csbg:…@YOUR_SERVER_IP:5432/csbg_intake`.
 
