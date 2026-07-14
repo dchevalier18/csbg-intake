@@ -6,6 +6,30 @@ tracks a federal instrument or guideline revision) are marked **[compliance]**
 
 ## Unreleased — 0.5.0 (roadmap Phases 1–5)
 
+### Duplicate matching becomes real (integration groundwork)
+- **One shared matching engine** (`src/lib/matching.ts`): exact identity =
+  normalized name + date of birth; "possible" = same last name plus a matching
+  DOB or similar first name, with phone as a tiebreaker signal. The intake
+  duplicate warning, the client-migration import, and the approval guard all
+  use it — and future API syncs (HMIS) will too.
+- **Duplicate review queue**: client-migration import rows that closely match
+  an existing client are **held for human review** instead of importing as
+  probable duplicates. The Data page gets a real "Duplicate review" panel —
+  use the existing record (enrolls it in the row's program and logs its
+  service), create a new client, or dismiss the row. Every resolution is
+  audited; the "awaiting review" stat is now the live queue count.
+- **Approval duplicate guard**: approving a fresh intake that exactly matches
+  an existing client's name + DOB now prompts the reviewer — add the program
+  to the existing record (one service history, no duplicate) or confirm a
+  separate person. Previously the intake-time warning was advisory only and
+  approval created the duplicate silently.
+- **External-ID linkage table** (`client_external_ids`): durable
+  (system, external id) → client mapping, ready for the HMIS Client ID and
+  any other source system, so post-first-link syncs match exactly by ID.
+- The "How matching works" panel no longer claims SSN matching (the system
+  stores no SSN in any form; the HMIS MOU excludes it) and the demo HMIS
+  integration card no longer fakes a de-dup backlog.
+
 ### Import wizard: downloadable blank templates
 - Every import option (Client migration, Pantry member agencies, Pantry
   aggregates, Seminar sign-ins, Volunteer hours) offers a blank CSV download
