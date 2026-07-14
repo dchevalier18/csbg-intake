@@ -6,6 +6,8 @@ import { revalidatePath } from "next/cache";
 import { and, eq, inArray } from "drizzle-orm";
 import { readSheet } from "@/lib/spreadsheet";
 import { db, t } from "@/db";
+import type { HeldClientPayload } from "@/db/schema";
+import { classifyMatches, matchKey } from "@/lib/matching";
 import { requireAdmin } from "@/lib/auth";
 import { audit, getPrograms } from "@/lib/access";
 import { programType } from "@/lib/program-types";
@@ -53,11 +55,13 @@ export interface ImportSummary {
   imported: number;
   updated: number;
   skipped: number;
+  /** rows held in the duplicate review queue — resolved on the Data page */
+  queued: number;
   errors: string[];
 }
 
 const fail = (message: string): ImportSummary =>
-  ({ ok: false, message, imported: 0, updated: 0, skipped: 0, errors: [] });
+  ({ ok: false, message, imported: 0, updated: 0, skipped: 0, queued: 0, errors: [] });
 
 const num = (s: string): number | null => {
   const t = s.trim();
@@ -152,6 +156,8 @@ export async function commitImport(
   let updated = 0;
   const errors: string[] = [];
   const createdClientIds: string[] = []; // tagged with the import job id below → enables undo
+  // Near-matches held for human review ("conflicts queue — nothing merges silently").
+  const held: Array<{ rowNo: number; payload: HeldClientPayload; candidateIds: string[] }> = [];
   const skip = (rowNo: number, why: string) => errors.push(`Row ${rowNo}: ${why}`);
 
   if (tpl.id === "clients") {
@@ -163,8 +169,11 @@ export async function commitImport(
       programByRef.set(p.short.toLowerCase(), p.id);
       programByRef.set(p.name.toLowerCase(), p.id);
     }
-    const existing = await db.select({ first: t.clients.first, last: t.clients.last, dob: t.clients.dob }).from(t.clients);
-    const seen = new Set(existing.map((c) => `${c.first.toLowerCase()}|${c.last.toLowerCase()}|${c.dob}`));
+    const candidates = await db.select({
+      id: t.clients.id, first: t.clients.first, last: t.clients.last,
+      dob: t.clients.dob, phone: t.clients.phone,
+    }).from(t.clients);
+    const seen = new Set(candidates.map(matchKey));
     const org = (await db.select().from(t.organization).where(eq(t.organization.id, 1)))[0];
     const active = await getActiveFpl(); // default when a row names no guideline year
     const schedules = await getFplHistory();
@@ -189,7 +198,7 @@ export async function commitImport(
       if (!first || !last) { skip(rowNo, "missing first or last name"); continue; }
       const dob = parseDateIso(cell(row, "dob"));
       if (!dob) { skip(rowNo, `date of birth “${cell(row, "dob")}” — use a format like 2001-05-14`); continue; }
-      const key = `${first.toLowerCase()}|${last.toLowerCase()}|${dob}`;
+      const key = matchKey({ first, last, dob });
       if (seen.has(key)) { skip(rowNo, `${first} ${last} (${dob}) already has a client record`); continue; }
       const programRef = cell(row, "program");
       const programId = programByRef.get(programRef.toLowerCase());
@@ -256,6 +265,38 @@ export async function commitImport(
       const serviceDateRaw = cell(row, "serviceDate");
       const serviceDate = serviceDateRaw ? parseDateIso(serviceDateRaw) : enrolled;
       if (!serviceDate) { skip(rowNo, `service date “${serviceDateRaw}” — use a format like 2026-01-15`); continue; }
+
+      // Not an exact record, but close to one (same last name + DOB, or a
+      // near-miss first name)? Hold the row for human review instead of
+      // creating a possible duplicate — resolved on the Data page.
+      const { possible } = classifyMatches({ first, last, dob, phone: cell(row, "phone") || null }, candidates);
+      if (possible.length > 0) {
+        held.push({
+          rowNo,
+          payload: {
+            kind: "client",
+            client: {
+              first, last, dob,
+              phone: cell(row, "phone") || null,
+              address: cell(row, "address") || null,
+              sex: canonOr("C1", cell(row, "sex")),
+              race: canonOr("C6", cell(row, "race")),
+              housing: canonOr("D11", cell(row, "housing")),
+              hhType: canonOr("D9", cell(row, "hhType")),
+              hhSize,
+              income: annualIncome,
+              incomeWorksheet: worksheet,
+              enrolled,
+              fplYear,
+            },
+            programId,
+            serviceCode: serviceCode || undefined,
+            serviceDate: serviceCode ? serviceDate : undefined,
+          },
+          candidateIds: possible.map((m) => m.client.id),
+        });
+        continue;
+      }
 
       const clientId = await nextClientId();
       await db.insert(t.clients).values({
@@ -502,6 +543,7 @@ export async function commitImport(
   }
 
   const skipped = errors.length;
+  const queued = held.length;
   const [job] = await db.insert(t.importJobs).values({
     at: new Date().toISOString(),
     template: tpl.id,
@@ -516,17 +558,147 @@ export async function commitImport(
   if (createdClientIds.length > 0) {
     await db.update(t.clients).set({ importJobId: job.id }).where(inArray(t.clients.id, createdClientIds));
   }
+  // Near-matches land in the duplicate review queue, tied back to this file/row.
+  const now = new Date().toISOString();
+  for (const h of held) {
+    await db.insert(t.matchReviews).values({
+      at: now,
+      source: "sheets",
+      sourceRef: `${filename} row ${h.rowNo}`,
+      payload: h.payload,
+      candidateIds: h.candidateIds,
+    });
+  }
   if (imported + updated > 0) {
     await db.update(t.integrations).set({ lastSync: shortDate(todayIso()) }).where(eq(t.integrations.id, "sheets"));
   }
   await audit(user.id, "data.import", "integration", "sheets",
-    `${tpl.name} · ${filename} · ${imported} imported, ${updated} updated, ${skipped} skipped`);
+    `${tpl.name} · ${filename} · ${imported} imported, ${updated} updated, ${skipped} skipped` +
+    (queued ? `, ${queued} held for duplicate review` : ""));
   revalidatePath("/", "layout");
 
+  const queuedNote = queued
+    ? ` ${fmt(queued)} row${queued === 1 ? " is" : "s are"} held for duplicate review below — nothing merges silently.`
+    : "";
   const message = imported + updated > 0
-    ? `Import complete — ${fmt(imported)} added and ${fmt(updated)} updated in ${tpl.target}${skipped ? `; ${fmt(skipped)} row${skipped === 1 ? "" : "s"} skipped` : ""}.`
-    : `Nothing imported — all ${fmt(skipped)} row${skipped === 1 ? "" : "s"} were skipped. Check the row notes below.`;
-  return { ok: true, message, imported, updated, skipped, errors };
+    ? `Import complete — ${fmt(imported)} added and ${fmt(updated)} updated in ${tpl.target}${skipped ? `; ${fmt(skipped)} row${skipped === 1 ? "" : "s"} skipped` : ""}.${queuedNote}`
+    : queued > 0
+      ? `No rows imported directly.${queuedNote}`
+      : `Nothing imported — all ${fmt(skipped)} row${skipped === 1 ? "" : "s"} were skipped. Check the row notes below.`;
+  return { ok: true, message, imported, updated, skipped, queued, errors };
+}
+
+/* ---------- Duplicate review queue ---------- */
+
+export type ReviewAction =
+  | { type: "link"; clientId: string }   // use the existing record
+  | { type: "create" }                   // genuinely a different person
+  | { type: "dismiss" };                 // drop the incoming row entirely
+
+/** Resolve a held match-review row. Every resolution is audited; link/create
+    update the staff-resolved matching counter shown on the Data page. */
+export async function resolveMatchReview(id: number, action: ReviewAction): Promise<{ ok: boolean; message: string }> {
+  const user = await requireAdmin();
+
+  const review = (await db.select().from(t.matchReviews).where(eq(t.matchReviews.id, id)))[0];
+  if (!review || review.status !== "pending") {
+    return { ok: false, message: "That review is gone or already resolved — refresh the page." };
+  }
+  const p = review.payload;
+  const person = `${p.client.first} ${p.client.last}`;
+  const now = new Date().toISOString();
+
+  let resolution: string;
+  let resolvedClientId: string | null = null;
+  let message: string;
+
+  if (action.type === "link") {
+    // server-side re-check: only a listed candidate can be linked
+    if (!review.candidateIds.includes(action.clientId)) {
+      return { ok: false, message: "That client isn't a candidate for this review." };
+    }
+    const existing = (await db.select().from(t.clients).where(eq(t.clients.id, action.clientId)))[0];
+    if (!existing) return { ok: false, message: `Client ${action.clientId} no longer exists.` };
+    const enrolled = (await db.select().from(t.clientPrograms)
+      .where(eq(t.clientPrograms.clientId, existing.id)))
+      .some((m) => m.programId === p.programId);
+    if (!enrolled) {
+      await db.insert(t.clientPrograms).values({ clientId: existing.id, programId: p.programId });
+    }
+    if (p.serviceCode && p.serviceDate) {
+      await db.insert(t.serviceLog).values({
+        date: p.serviceDate,
+        clientId: existing.id,
+        code: p.serviceCode,
+        programId: p.programId,
+        staffId: user.id,
+        note: "Imported row matched to existing record on review",
+      });
+    }
+    if (p.externalId) {
+      await db.insert(t.clientExternalIds)
+        .values({ system: p.externalId.system, externalId: p.externalId.id, clientId: existing.id, linkedAt: now, linkedBy: user.id })
+        .onConflictDoNothing();
+    }
+    resolution = "linked";
+    resolvedClientId = existing.id;
+    message = `${person} matched to existing record ${existing.id} — no duplicate created.`;
+  } else if (action.type === "create") {
+    // the queue may be stale — never create a second exact record
+    const candidates = await db.select({
+      id: t.clients.id, first: t.clients.first, last: t.clients.last, dob: t.clients.dob,
+    }).from(t.clients);
+    const key = matchKey(p.client);
+    if (candidates.some((c) => matchKey(c) === key)) {
+      return { ok: false, message: `${person} (${p.client.dob}) now has an exact client record — use “Use existing record” instead.` };
+    }
+    const clientId = await nextClientId();
+    await db.insert(t.clients).values({
+      id: clientId,
+      ...p.client,
+      caseworkerId: user.id,
+      nextFollowUp: null,
+      flags: ["Migrated record — verify characteristics"],
+      custom: {},
+      status: "active",
+      createdAt: now,
+    });
+    await db.insert(t.clientPrograms).values({ clientId, programId: p.programId });
+    if (p.serviceCode && p.serviceDate) {
+      await db.insert(t.serviceLog).values({
+        date: p.serviceDate, clientId, code: p.serviceCode, programId: p.programId,
+        staffId: user.id, note: "Imported with client record (cleared duplicate review)",
+      });
+    }
+    if (p.externalId) {
+      await db.insert(t.clientExternalIds)
+        .values({ system: p.externalId.system, externalId: p.externalId.id, clientId, linkedAt: now, linkedBy: user.id })
+        .onConflictDoNothing();
+    }
+    resolution = "created";
+    resolvedClientId = clientId;
+    message = `${person} confirmed as a new client — record ${clientId} created.`;
+  } else {
+    resolution = "dismissed";
+    message = `The incoming row for ${person} was dismissed — nothing was created.`;
+  }
+
+  await db.update(t.matchReviews).set({
+    status: "resolved",
+    resolution,
+    resolvedClientId,
+    resolvedBy: user.id,
+    resolvedAt: now,
+  }).where(eq(t.matchReviews.id, id));
+
+  const m = await kvGet<{ auto: number; staff: number; awaiting: number; silent: number }>(
+    "matching", { auto: 0, staff: 0, awaiting: 0, silent: 0 });
+  await kvSet("matching", { ...m, staff: m.staff + 1 });
+
+  await audit(user.id, "data.match-review", "match-review", String(id),
+    `${review.sourceRef || review.source} · ${person} → ${resolution}${resolvedClientId ? ` (${resolvedClientId})` : ""}`);
+  revalidatePath("/", "layout");
+  return { ok: true, message };
 }
 
 export interface UndoResult { ok: boolean; message: string; removed: number; }

@@ -102,6 +102,31 @@ async function main(): Promise<void> {
   await db.delete(t.kv).where(eq(t.kv.key, "smoke"));
   check("delete builder works", (await db.select().from(t.kv).where(eq(t.kv.key, "smoke"))).length === 0);
 
+  // integration groundwork: external-ID linkage + duplicate review queue round-trips
+  await db.insert(t.clientExternalIds).values({
+    system: "hmis", externalId: "HM-90001", clientId: clients[0].id,
+    linkedAt: "2026-07-14T00:00:00Z", linkedBy: "smoke",
+  });
+  const linked = (await db.select().from(t.clientExternalIds)
+    .where(and(eq(t.clientExternalIds.system, "hmis"), eq(t.clientExternalIds.externalId, "HM-90001"))))[0];
+  check("client_external_ids round-trip", linked?.clientId === clients[0].id);
+
+  const [review] = await db.insert(t.matchReviews).values({
+    at: "2026-07-14T00:00:00Z", source: "sheets", sourceRef: "smoke.csv row 2",
+    payload: {
+      kind: "client",
+      client: { first: "Ana", last: "Reyes", dob: "1990-01-01", phone: null, address: null,
+        sex: null, race: null, housing: null, hhType: null, hhSize: 1,
+        income: 12000, enrolled: "2026-07-14", fplYear: 2026 },
+      programId: "csbg",
+    },
+    candidateIds: [clients[0].id],
+  }).returning({ id: t.matchReviews.id });
+  const pendingReviews = await db.select().from(t.matchReviews).where(eq(t.matchReviews.status, "pending"));
+  check("match_reviews pending round-trip", pendingReviews.some((r) => r.id === review.id));
+  check("match_reviews jsonb payload typed", pendingReviews[0]?.payload.client.first === "Ana"
+    && Array.isArray(pendingReviews[0]?.candidateIds));
+
   await pglite.close();
 
   // ---------- Production init path (CSBG_DEMO_SEED=0 → /setup wizard) ----------

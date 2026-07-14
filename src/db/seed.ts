@@ -357,7 +357,7 @@ export async function runSeed(db: DB): Promise<void> {
   await db.insert(t.integrations).values([
     { id: "rxoffice", name: "RX Office", kind: "API", status: "connected", lastSync: "Today 6:00 AM", records: "4,212 clients", detail: "Housing counseling CMS — nightly two-way sync" },
     { id: "hancock", name: "Hancock", kind: "API", status: "connected", lastSync: "Today 6:00 AM", records: "1,876 energy cases", detail: "Weatherization / LIHEAP case data" },
-    { id: "hmis", name: "HMIS (PA-503)", kind: "API", status: "attention", lastSync: "Jun 6, 11:40 PM", records: "912 shelter records", detail: "Eastern PA CoC — 14 records failed de-dup, needs review" },
+    { id: "hmis", name: "HMIS (PA-503)", kind: "API", status: "ready", lastSync: "—", records: "MOU signed", detail: "Eastern PA CoC — read-only client sync; awaiting vendor API setup" },
     { id: "cap60", name: "CAP60", kind: "Import", status: "connected", lastSync: "Jun 1", records: "FY25 archive", detail: "Legacy CSBG system — historical import complete" },
     { id: "sheets", name: "Spreadsheet import", kind: "CSV / XLSX", status: "ready", lastSync: "Jun 8", records: "3 templates", detail: "Pantry aggregates, seminar sign-ins, volunteer hours" },
   ]);
@@ -376,7 +376,8 @@ export async function runSeed(db: DB): Promise<void> {
     ] },
     { key: "shfbStats", value: { agencies: 212, countiesServed: 6, lbsYTD: 14600000, mealsYTD: 8100000, reportsThisMonth: { received: 178, missing: 34 } } },
     { key: "volStats", value: { totalHoursFY: 11840, lowIncomeHoursFY: 4120, activeVolunteers: 386 } },
-    { key: "matching", value: { auto: 6988, staff: 312, awaiting: 14, silent: 0 } },
+    // `awaiting` is computed live from the match_reviews queue — never stored
+    { key: "matching", value: { auto: 6988, staff: 312, awaiting: 0, silent: 0 } },
     { key: "wxStats", value: { unitsCompletedFY: 96, avgDaysAuditToQc: 38 } },
   ]);
 

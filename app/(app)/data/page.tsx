@@ -1,4 +1,4 @@
-import { desc } from "drizzle-orm";
+import { desc, eq, inArray } from "drizzle-orm";
 import { db, t } from "@/db";
 import { requireAdmin } from "@/lib/auth";
 import { getStaff, kvGet } from "@/lib/data/core";
@@ -6,15 +6,47 @@ import { getPrograms } from "@/lib/access";
 import { getFplHistory } from "@/lib/fpl";
 import { importTemplate } from "@/lib/import-templates";
 import { localDateOf, shortDate } from "@/lib/format";
-import { DataClient, type MatchingStats } from "./data-client";
+import { DataClient, type MatchingStats, type ReviewRow } from "./data-client";
 
 export default async function DataPage() {
   await requireAdmin();
 
   const integrations = await db.select().from(t.integrations);
-  const matching = await kvGet<MatchingStats>("matching", { auto: 0, staff: 0, awaiting: 0, silent: 0 });
+  const kvMatching = await kvGet<MatchingStats>("matching", { auto: 0, staff: 0, awaiting: 0, silent: 0 });
+
+  // Duplicate review queue — `awaiting` is the LIVE pending count, not a stored stat.
+  const pendingReviews = await db.select().from(t.matchReviews).where(eq(t.matchReviews.status, "pending"));
+  const matching: MatchingStats = { ...kvMatching, awaiting: pendingReviews.length };
+  const candidateIds = [...new Set(pendingReviews.flatMap((r) => r.candidateIds))];
+  const candidateClients = candidateIds.length > 0
+    ? await db.select({
+        id: t.clients.id, first: t.clients.first, last: t.clients.last, dob: t.clients.dob,
+        phone: t.clients.phone, address: t.clients.address, enrolled: t.clients.enrolled,
+      }).from(t.clients).where(inArray(t.clients.id, candidateIds))
+    : [];
+  const candidateById = new Map(candidateClients.map((c) => [c.id, c]));
 
   const programs = (await getPrograms()).map((p) => ({ id: p.id, short: p.short, name: p.name }));
+  const programShort = new Map(programs.map((p) => [p.id, p.short]));
+
+  const reviews: ReviewRow[] = pendingReviews.map((r) => ({
+    id: r.id,
+    when: shortDate(localDateOf(r.at)),
+    sourceId: r.source,
+    source: integrations.find((x) => x.id === r.source)?.name ?? r.source,
+    sourceRef: r.sourceRef,
+    incoming: {
+      first: r.payload.client.first,
+      last: r.payload.client.last,
+      dob: r.payload.client.dob,
+      phone: r.payload.client.phone,
+      address: r.payload.client.address,
+      program: programShort.get(r.payload.programId) ?? r.payload.programId,
+    },
+    candidates: r.candidateIds
+      .map((id) => candidateById.get(id))
+      .filter((c): c is NonNullable<typeof c> => !!c),
+  }));
   const fplYears = (await getFplHistory()).map((s) => s.year);
   const services = (await db.select().from(t.services).orderBy(t.services.sort))
     .filter((s) => s.active === 1)
@@ -48,6 +80,7 @@ export default async function DataPage() {
         detail: x.detail,
       }))}
       matching={matching}
+      reviews={reviews}
       importJobs={importJobs}
       programs={programs}
       fplYears={fplYears}

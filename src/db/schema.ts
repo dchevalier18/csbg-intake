@@ -315,6 +315,51 @@ export const integrations = pgTable("integrations", {
   detail: text("detail").notNull().default(""),
 });
 
+// Durable linkage to external systems (HMIS client IDs, etc.) — one row per
+// (system, external id); every sync after first linkage matches on this, not names.
+export const clientExternalIds = pgTable("client_external_ids", {
+  system: text("system").notNull(),             // 'hmis' | 'rxoffice' | …
+  externalId: text("external_id").notNull(),
+  clientId: text("client_id").notNull(),
+  linkedAt: text("linked_at").notNull(),        // ISO datetime
+  linkedBy: text("linked_by").notNull(),        // staff id, or 'sync'
+}, (t) => [primaryKey({ columns: [t.system, t.externalId] })]);
+
+/** An incoming client record held for duplicate review — enough to create the
+    client (or enroll an existing one) when a human resolves the match. */
+export interface HeldClientPayload {
+  kind: "client";
+  client: {
+    first: string; last: string; dob: string;
+    phone: string | null; address: string | null;
+    sex: string | null; race: string | null; housing: string | null;
+    hhType: string | null; hhSize: number;
+    income: number; incomeWorksheet?: IncomeWorksheet;
+    enrolled: string; fplYear: number;
+  };
+  programId: string;
+  serviceCode?: string;
+  serviceDate?: string;
+  /** external-system linkage recorded on resolution (future API syncs) */
+  externalId?: { system: string; id: string };
+}
+
+// Duplicate review queue — incoming records whose match against existing
+// clients is ambiguous. Nothing merges silently; a human resolves each row.
+export const matchReviews = pgTable("match_reviews", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  at: text("at").notNull(),                     // ISO datetime
+  source: text("source").notNull(),             // integration id: 'sheets' | 'hmis' | …
+  sourceRef: text("source_ref").notNull().default(""), // e.g. 'roster.csv row 12'
+  payload: jsonb("payload").$type<HeldClientPayload>().notNull(),
+  candidateIds: jsonb("candidate_ids").$type<string[]>().notNull().default([]),
+  status: text("status").notNull().default("pending"), // 'pending' | 'resolved'
+  resolution: text("resolution"),               // 'linked' | 'created' | 'dismissed'
+  resolvedClientId: text("resolved_client_id"),
+  resolvedBy: text("resolved_by"),
+  resolvedAt: text("resolved_at"),
+});
+
 // Spreadsheet import history (Data & integrations → Import spreadsheet)
 export const importJobs = pgTable("import_jobs", {
   id: integer("id").primaryKey().generatedByDefaultAsIdentity(),

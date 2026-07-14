@@ -9,7 +9,7 @@ import { I } from "@/components/icons";
 import { useToast } from "@/components/toast";
 import { fmt } from "@/lib/format";
 import { IMPORT_TEMPLATES, autoMapColumns, importTemplate, templateCsv, type ImportTemplate, type ImportField } from "@/lib/import-templates";
-import { parseImportFile, commitImport, undoImport, type ImportSummary } from "./actions";
+import { parseImportFile, commitImport, undoImport, resolveMatchReview, type ImportSummary, type ReviewAction } from "./actions";
 import { INCOME_PERIODS } from "@/lib/income";
 
 export interface IntegrationRow {
@@ -27,6 +27,22 @@ export interface MatchingStats {
   staff: number;
   awaiting: number;
   silent: number;
+}
+
+export interface ReviewRow {
+  id: number;
+  when: string;
+  sourceId: string;
+  source: string;
+  sourceRef: string;
+  incoming: {
+    first: string; last: string; dob: string;
+    phone: string | null; address: string | null; program: string;
+  };
+  candidates: Array<{
+    id: string; first: string; last: string; dob: string;
+    phone: string | null; address: string | null; enrolled: string;
+  }>;
 }
 
 export interface ImportJobRow {
@@ -47,9 +63,10 @@ const label: Record<string, string> = { connected: "Connected", attention: "Need
 export interface ProgramOption { id: string; short: string; name: string; }
 export interface ServiceOption { code: string; label: string; }
 
-export function DataClient({ integrations, matching, importJobs, programs, fplYears, services }: {
+export function DataClient({ integrations, matching, reviews, importJobs, programs, fplYears, services }: {
   integrations: IntegrationRow[];
   matching: MatchingStats;
+  reviews: ReviewRow[];
   importJobs: ImportJobRow[];
   programs: ProgramOption[];
   fplYears: number[];
@@ -99,12 +116,11 @@ export function DataClient({ integrations, matching, importJobs, programs, fplYe
               <span>Last sync: {x.lastSync}</span>
               <span>{x.records}</span>
             </div>
-            {x.status === "attention" ? (
+            {reviews.some((r) => r.sourceId === x.id) ? (
               <div style={{ marginTop: 12, background: "var(--calv-amber-15)", border: "1px solid var(--calv-amber-35)", borderRadius: 4, padding: "9px 12px", fontSize: 12.5, display: "flex", gap: 10, alignItems: "center" }}>
                 <I name="alert" size={14} style={{ color: "#8A6410" }} />
-                14 incoming HMIS records matched existing clients with conflicts.
-                <button className="calv-btn calv-btn--quiet calv-btn--sm" style={{ marginLeft: "auto" }}
-                  onClick={() => toast("De-duplication review queued — conflicts assigned to the data team.")}>Review matches</button>
+                {fmt(reviews.filter((r) => r.sourceId === x.id).length)} incoming record{reviews.filter((r) => r.sourceId === x.id).length === 1 ? "" : "s"} matched existing clients — resolve below.
+                <a className="calv-btn calv-btn--quiet calv-btn--sm" style={{ marginLeft: "auto" }} href="#match-reviews">Review matches</a>
               </div>
             ) : null}
             {x.id === "sheets" ? (
@@ -125,6 +141,20 @@ export function DataClient({ integrations, matching, importJobs, programs, fplYe
           </button>
         </Panel>
       </div>
+
+      {reviews.length > 0 ? (
+        <div id="match-reviews">
+          <Panel
+            title="Duplicate review"
+            sub="Incoming records that closely match an existing client — resolve each one; nothing merges silently."
+            style={{ marginBottom: 13 }}
+          >
+            {reviews.map((r) => (
+              <ReviewCard key={r.id} review={r} toast={toast} onResolved={() => router.refresh()} />
+            ))}
+          </Panel>
+        </div>
+      ) : null}
 
       <Panel title="Recent imports" sub="Spreadsheet imports land here with row-level results." style={{ marginBottom: 13 }}>
         {importJobs.length === 0 ? (
@@ -154,7 +184,7 @@ export function DataClient({ integrations, matching, importJobs, programs, fplYe
         )}
       </Panel>
 
-      <Panel title="How matching works" sub="Incoming records are matched on name + DOB + last-4 SSN; conflicts queue for human review — nothing merges silently.">
+      <Panel title="How matching works" sub="Incoming records are matched on name + date of birth — plus the source system's client ID once a record is linked; conflicts queue for human review — nothing merges silently.">
         <div style={{ display: "flex", gap: 24, fontSize: 12.5, color: "var(--calv-slate-65)", flexWrap: "wrap" }}>
           <span><strong style={{ fontWeight: 600, color: "var(--calv-slate)" }}>{fmt(matching.auto)}</strong> records matched automatically this FY</span>
           <span><strong style={{ fontWeight: 600, color: "var(--calv-slate)" }}>{fmt(matching.staff)}</strong> resolved by staff review</span>
@@ -187,6 +217,60 @@ export function DataClient({ integrations, matching, importJobs, programs, fplYe
           </div>
         </Modal>
       ) : null}
+    </div>
+  );
+}
+
+/* One held incoming record vs. its candidate matches. "Use existing record"
+   enrolls the candidate (no duplicate); "Create new client" confirms they are
+   different people; "Dismiss" drops the incoming row. */
+function ReviewCard({ review, toast, onResolved }: {
+  review: ReviewRow;
+  toast: (msg: string) => void;
+  onResolved: () => void;
+}) {
+  const [pending, startResolve] = useTransition();
+  const r = review;
+
+  function resolve(action: ReviewAction) {
+    if (pending) return;
+    startResolve(async () => {
+      const res = await resolveMatchReview(r.id, action);
+      toast(res.message);
+      if (res.ok) onResolved();
+    });
+  }
+
+  const line = (c: { dob: string; phone: string | null; address: string | null }) =>
+    [`DOB ${c.dob}`, c.phone, c.address].filter(Boolean).join(" · ");
+
+  return (
+    <div style={{ border: "1px solid var(--calv-slate-15)", borderRadius: 4, padding: "12px 14px", marginBottom: 10 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
+        <div>
+          <strong style={{ fontWeight: 600 }}>{r.incoming.first} {r.incoming.last}</strong>
+          <span style={{ fontSize: 12.5, color: "var(--calv-slate-65)", marginLeft: 8 }}>{line(r.incoming)} · {r.incoming.program}</span>
+        </div>
+        <span style={{ fontSize: 11.5, color: "var(--calv-slate-65)" }}>{r.source} · {r.sourceRef} · {r.when}</span>
+      </div>
+      <div style={{ fontSize: 12.5, color: "var(--calv-slate-65)", marginBottom: 6 }}>Possible existing match{r.candidates.length === 1 ? "" : "es"}:</div>
+      {r.candidates.map((c) => (
+        <div key={c.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, padding: "7px 10px", background: "var(--calv-amber-15)", border: "1px solid var(--calv-amber-35)", borderRadius: 4, marginBottom: 6, fontSize: 12.5, flexWrap: "wrap" }}>
+          <span>
+            <strong style={{ fontWeight: 600 }}>{c.first} {c.last}</strong>{" "}
+            <span style={{ color: "var(--calv-slate-65)" }}>({c.id}) — {line(c)} · enrolled {c.enrolled}</span>
+          </span>
+          <button className="calv-btn calv-btn--secondary calv-btn--sm" disabled={pending} onClick={() => resolve({ type: "link", clientId: c.id })}>
+            <I name="check" size={13} /> Use existing record
+          </button>
+        </div>
+      ))}
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 8 }}>
+        <button className="calv-btn calv-btn--quiet calv-btn--sm" disabled={pending} onClick={() => resolve({ type: "dismiss" })}>Dismiss row</button>
+        <button className="calv-btn calv-btn--quiet calv-btn--sm" disabled={pending} onClick={() => resolve({ type: "create" })}>
+          <I name="plus" size={13} /> Create new client
+        </button>
+      </div>
     </div>
   );
 }
