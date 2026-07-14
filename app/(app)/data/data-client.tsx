@@ -7,7 +7,7 @@ import { Modal } from "@/components/ui-client";
 import { I } from "@/components/icons";
 import { useToast } from "@/components/toast";
 import { fmt } from "@/lib/format";
-import { IMPORT_TEMPLATES, autoMapColumns, importTemplate, type ImportTemplate } from "@/lib/import-templates";
+import { IMPORT_TEMPLATES, autoMapColumns, importTemplate, templateCsv, type ImportTemplate } from "@/lib/import-templates";
 import { parseImportFile, commitImport, type ImportSummary } from "./actions";
 
 export interface IntegrationRow {
@@ -142,6 +142,20 @@ export function DataClient({ integrations, matching, importJobs }: {
 
 /* ---------- Import wizard: template → upload → map columns → results ---------- */
 
+/** Save a blank CSV for a template: exact headers + one example row the
+    importer skips if it's left in. BOM so Excel opens it as UTF-8. */
+function downloadTemplate(tp: ImportTemplate) {
+  const blob = new Blob(["\uFEFF" + templateCsv(tp)], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `cap-trellis-import-${tp.id}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 type WizardStep = "pick" | "map" | "done";
 
 function ImportWizard({ onClose, toast }: { onClose: () => void; toast: (msg: string) => void }) {
@@ -204,8 +218,9 @@ function ImportWizard({ onClose, toast }: { onClose: () => void; toast: (msg: st
         <>
           <p style={{ fontSize: 12.5, color: "var(--calv-slate-65)", margin: "0 0 12px" }}>
             Pick the recurring template, then upload the CSV or XLSX export — columns map automatically and nothing lands without your review.
+            Starting from scratch? Download a blank template below, fill it in, and upload it.
           </p>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10, marginBottom: 16 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10, marginBottom: 12 }}>
             {IMPORT_TEMPLATES.map((tp) => (
               <button
                 key={tp.id}
@@ -222,6 +237,16 @@ function ImportWizard({ onClose, toast }: { onClose: () => void; toast: (msg: st
                 </div>
                 <div style={{ fontSize: 11.5, color: "var(--calv-slate-65)", lineHeight: 1.45 }}>{tp.blurb}</div>
               </button>
+            ))}
+          </div>
+          <div style={{ display: "flex", gap: 6, alignItems: "baseline", flexWrap: "wrap", fontSize: 12, color: "var(--calv-slate-65)", marginBottom: 14 }}>
+            <I name="doc" size={12} style={{ alignSelf: "center" }} />
+            <span>Blank templates (CSV, with an example row to replace):</span>
+            {IMPORT_TEMPLATES.map((tp, i) => (
+              <span key={tp.id}>
+                <a className="tlink" style={{ cursor: "pointer" }} onClick={() => downloadTemplate(tp)}>{tp.name}</a>
+                {i < IMPORT_TEMPLATES.length - 1 ? <span style={{ color: "var(--calv-slate-35)" }}> · </span> : null}
+              </span>
             ))}
           </div>
           <div className="fgrid">
