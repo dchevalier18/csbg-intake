@@ -81,12 +81,11 @@ export async function publishFpl(
   // warn-don't-block: agencies may publish state-specific figures on purpose
   const official = officialFpl(y, jurisdiction as Jurisdiction);
   const matchesOfficial = official && official.base === b && official.perAdditional === p;
-  // Effective date: explicit > official HHS date > mid-January of the year
-  // (HHS's usual timing). It must fall inside the guideline year — imports and
-  // point-in-time lookups resolve "the schedule in force on a date" from it,
-  // so a backfilled prior year stamped with today's date would shadow the
-  // current schedule.
-  const effective = opts?.effective?.trim() || official?.effective || `${y}-01-15`;
+  // Effective date: explicit > official HHS date > January 1 of the year.
+  // It must fall inside the guideline year — imports and point-in-time lookups
+  // resolve "the schedule in force on a date" from it, so a backfilled prior
+  // year stamped with today's date would shadow the current schedule.
+  const effective = opts?.effective?.trim() || official?.effective || `${y}-01-01`;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(effective)) return { ok: false, message: "Enter the effective date as YYYY-MM-DD." };
   if (Number(effective.slice(0, 4)) !== y) {
     return { ok: false, message: `The effective date should fall in ${y} — date-based lookups key on it.` };
@@ -136,6 +135,26 @@ export async function setJurisdiction(id: string): Promise<ActionResult> {
   await audit(admin.id, "org.jurisdiction", "organization", "1", `FPL jurisdiction → ${jurisdictionLabel(id)}`);
   revalidatePath("/", "layout");
   return { ok: true, message: `Guideline table set to ${jurisdictionLabel(id)}. Published years keep their stored dollars.` };
+}
+
+/** Correct the effective date of a published guideline year. Safe at any time:
+    pinned determinations key on the YEAR; the effective date only drives
+    "schedule in force on a date" lookups (imports, backfills) and display. */
+export async function setFplEffective(year: number, effective: string): Promise<ActionResult> {
+  const admin = await requireAdmin();
+  const y = Math.round(Number(year));
+  const e = String(effective ?? "").trim();
+  const target = (await db.select().from(t.fplSchedules).where(eq(t.fplSchedules.year, y)))[0];
+  if (!target) return { ok: false, message: "That guideline year doesn't exist." };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(e)) return { ok: false, message: "Enter the effective date as YYYY-MM-DD." };
+  if (Number(e.slice(0, 4)) !== y) {
+    return { ok: false, message: `The effective date should fall in ${y} — date-based lookups key on it.` };
+  }
+  if (e === target.effective) return { ok: true };
+  await db.update(t.fplSchedules).set({ effective: e }).where(eq(t.fplSchedules.year, y));
+  await audit(admin.id, "fpl.effective", "fpl", String(y), `FPL ${y} effective date → ${e} (was ${target.effective})`);
+  revalidatePath("/", "layout");
+  return { ok: true, message: `FPL ${y} now shows effective ${e}.` };
 }
 
 export async function makeFplActive(year: number): Promise<ActionResult> {

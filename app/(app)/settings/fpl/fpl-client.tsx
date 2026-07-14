@@ -4,7 +4,7 @@ import { Panel, Field, Chip } from "@/components/ui";
 import { I } from "@/components/icons";
 import { useToast } from "@/components/toast";
 import { money, longDate } from "@/lib/format";
-import { patchActiveFpl, setCsbgCeiling, publishFpl, makeFplActive, setJurisdiction, officialFplFor } from "./actions";
+import { patchActiveFpl, setCsbgCeiling, publishFpl, makeFplActive, setJurisdiction, setFplEffective, officialFplFor } from "./actions";
 
 interface Sched {
   year: number;
@@ -65,7 +65,7 @@ export function FplClient({ history, ceiling: ceilingProp, pinned, jurisdiction:
         setPEffective(o.effective);
         setPrefillNote(`Prefilled from the published HHS ${y} table (${o.label}), effective ${longDate(o.effective)}.`);
       } else {
-        setPEffective(y >= 2000 && y <= 2100 ? `${y}-01-15` : "");
+        setPEffective(y >= 2000 && y <= 2100 ? `${y}-01-01` : "");
         setPrefillNote(null);
       }
     });
@@ -110,6 +110,11 @@ export function FplClient({ history, ceiling: ceilingProp, pinned, jurisdiction:
   async function onPublish() {
     const res = await publishFpl(Number(pYear), Number(pBase), Number(pPer), { activate: pActivate, effective: pEffective });
     if (res.ok) setShowPublish(false);
+    if (res.message) toast(res.message);
+  }
+
+  async function onEffective(year: number, effective: string) {
+    const res = await setFplEffective(year, effective);
     if (res.message) toast(res.message);
   }
 
@@ -205,7 +210,16 @@ export function FplClient({ history, ceiling: ceilingProp, pinned, jurisdiction:
                 <td className="cname">FPL {s.year}</td>
                 <td className="num">{money(s.base)}</td>
                 <td className="num">{money(s.perAdditional)}</td>
-                <td>{histDate(s.effective)}</td>
+                <td>
+                  <input
+                    type="date"
+                    defaultValue={s.effective}
+                    onBlur={(e) => { if (e.target.value && e.target.value !== s.effective) void onEffective(s.year, e.target.value); }}
+                    aria-label={"Effective date for FPL " + s.year}
+                    style={{ border: "1px solid transparent", background: "transparent", font: "inherit", padding: "2px 4px", borderRadius: 4, width: 140 }}
+                    onFocus={(e) => { e.target.style.border = "1px solid var(--calv-slate-35)"; e.target.style.background = "#fff"; }}
+                  />
+                </td>
                 <td style={{ fontSize: 12, color: "var(--calv-slate-65)" }}>{jurisdictionLabelOf(s.jurisdiction) ?? "—"}</td>
                 <td>{s.status === "active" ? <Chip tone="sage">Active</Chip> : <Chip>Archived</Chip>}</td>
                 <td className="num">{pinned[s.year] || "—"}</td>
