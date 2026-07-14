@@ -10,6 +10,7 @@ import { useToast } from "@/components/toast";
 import { fmt } from "@/lib/format";
 import { IMPORT_TEMPLATES, autoMapColumns, importTemplate, templateCsv, type ImportTemplate, type ImportField } from "@/lib/import-templates";
 import { parseImportFile, commitImport, undoImport, type ImportSummary } from "./actions";
+import { INCOME_PERIODS } from "@/lib/income";
 
 export interface IntegrationRow {
   id: string;
@@ -214,6 +215,14 @@ function FixedValueInput({ field, programs, fplYears, services, value, onChange 
       <select value={value} onChange={(e) => onChange(e.target.value)} aria-label={`Set ${field.label} for all rows`}>
         <option value="">— use the active schedule —</option>
         {fplYears.map((y) => <option key={y} value={String(y)}>{y}</option>)}
+      </select>
+    );
+  }
+  if (field.fixed === "period") {
+    return (
+      <select value={value} onChange={(e) => onChange(e.target.value)} aria-label={`Set ${field.label} for all rows`}>
+        <option value="">— annual (as provided) —</option>
+        {INCOME_PERIODS.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
       </select>
     );
   }

@@ -13,6 +13,7 @@ import { kvGet, kvSet, nextClientId } from "@/lib/data/core";
 import { importTemplate } from "@/lib/import-templates";
 import { getActiveFpl, getFplHistory, scheduleYearOn } from "@/lib/fpl";
 import { canonicalCharacteristic } from "@/lib/csbg-catalog";
+import { annualizeEntry, INCOME_PERIODS, type IncomePeriod } from "@/lib/income";
 import { fmt, shortDate, todayIso } from "@/lib/format";
 
 const MAX_FILE_BYTES = 4 * 1024 * 1024; // keep in step with serverActions.bodySizeLimit
@@ -102,6 +103,18 @@ function parseDateIso(s: string): string | null {
 
 const isYes = (s: string): boolean => ["yes", "y", "true", "1", "x"].includes(s.trim().toLowerCase());
 
+/* "Monthly" | "per month" | "biweekly" | "yearly" … → income period id (or null). */
+const PERIOD_ALIASES: Record<string, IncomePeriod> = {
+  annual: "annual", annually: "annual", yearly: "annual", year: "annual", yr: "annual",
+  monthly: "monthly", month: "monthly", mo: "monthly", "per month": "monthly",
+  weekly: "weekly", week: "weekly", wk: "weekly", "per week": "weekly",
+  biweekly: "biweekly", "bi-weekly": "biweekly", "every two weeks": "biweekly", fortnightly: "biweekly",
+  "twice-monthly": "twice-monthly", "twice monthly": "twice-monthly", "twice a month": "twice-monthly",
+  semimonthly: "twice-monthly", "semi-monthly": "twice-monthly",
+};
+const parsePeriod = (s: string): IncomePeriod | null =>
+  PERIOD_ALIASES[s.trim().toLowerCase().replace(/\s+/g, " ")] ?? null;
+
 /** Commit a parsed spreadsheet. Per-row validation — good rows land, bad rows skip with a reason. */
 export async function commitImport(
   templateId: string,
@@ -152,6 +165,7 @@ export async function commitImport(
     }
     const existing = await db.select({ first: t.clients.first, last: t.clients.last, dob: t.clients.dob }).from(t.clients);
     const seen = new Set(existing.map((c) => `${c.first.toLowerCase()}|${c.last.toLowerCase()}|${c.dob}`));
+    const org = (await db.select().from(t.organization).where(eq(t.organization.id, 1)))[0];
     const active = await getActiveFpl(); // default when a row names no guideline year
     const schedules = await getFplHistory();
     const scheduleYears = new Set(schedules.map((s) => s.year));
@@ -181,6 +195,25 @@ export async function commitImport(
       const programId = programByRef.get(programRef.toLowerCase());
       if (!programId) { skip(rowNo, programRef ? `no program matches “${programRef}”` : "missing program"); continue; }
       const income = num(cell(row, "income"));
+      // Income period: a non-annual figure is annualized for the FPL math and
+      // the ORIGINAL amount is preserved on the income worksheet.
+      const periodRaw = cell(row, "incomePeriod");
+      let period: IncomePeriod = "annual";
+      if (periodRaw) {
+        const canon = parsePeriod(periodRaw);
+        if (!canon) { skip(rowNo, `income period “${periodRaw}” — use Annual, Monthly, Weekly, Biweekly, or Twice-monthly`); continue; }
+        period = canon;
+      }
+      const rawIncome = income !== null && income > 0 ? income : 0;
+      const annualIncome = period === "annual" ? Math.round(rawIncome) : Math.round(annualizeEntry(rawIncome, period));
+      const periodLabel = INCOME_PERIODS.find((pp) => pp.id === period)?.label ?? period;
+      const worksheet = period !== "annual" && rawIncome > 0
+        ? {
+            entries: [{ source: `Imported (${periodLabel.toLowerCase()})`, amount: Math.round(rawIncome * 100) / 100, period }],
+            lookbackDays: org?.incomeLookbackDays ?? 90,
+            annualized: annualIncome,
+          }
+        : undefined;
       const hhSizeRaw = num(cell(row, "hhSize"));
       const hhSize = hhSizeRaw !== null ? Math.min(12, Math.max(1, Math.round(hhSizeRaw))) : 1;
       const enrolledRaw = cell(row, "enrolled");
@@ -237,7 +270,8 @@ export async function commitImport(
         housing: canonOr("D11", cell(row, "housing")),
         hhType: canonOr("D9", cell(row, "hhType")),
         hhSize,
-        income: income !== null && income > 0 ? Math.round(income) : 0,
+        income: annualIncome,
+        incomeWorksheet: worksheet,
         caseworkerId: user.id,
         enrolled,
         fplYear,

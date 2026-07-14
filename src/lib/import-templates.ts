@@ -17,9 +17,9 @@ export interface ImportField {
   /* When a field has no matching column, the client-migration import lets you
      set one fixed value for the whole file. `fixed` picks the widget:
      "program" = program dropdown, "year" = FPL-schedule-year dropdown,
-     "service" = AR 3.0 service dropdown, "text" (default) = free text.
-     Only surfaced for the clients template. */
-  fixed?: "text" | "program" | "year" | "service";
+     "service" = AR 3.0 service dropdown, "period" = income-period dropdown,
+     "text" (default) = free text. Only surfaced for the clients template. */
+  fixed?: "text" | "program" | "year" | "service" | "period";
 }
 
 export interface ImportTemplate {
@@ -51,8 +51,12 @@ export const IMPORT_TEMPLATES: ImportTemplate[] = [
         aliases: ["dob", "date of birth", "birth date", "birthdate", "born"], example: "2001-05-14" },
       { key: "program", label: "Program", required: true, hint: "Program name or id to enroll into",
         aliases: ["program", "program id", "program name", "enrolled program"], example: SENTINEL, fixed: "program" },
-      { key: "income", label: "Annual income ($)", required: false, hint: "Gross household income",
-        aliases: ["income", "annual income", "household income", "gross income", "yearly income"], example: "18500" },
+      { key: "income", label: "Income ($)", required: false, hint: "Gross household income — annual unless an income period says otherwise",
+        aliases: ["income", "annual income", "household income", "gross income", "yearly income", "monthly income"], example: "18500" },
+      { key: "incomePeriod", label: "Income period", required: false,
+        hint: "How the income figure is stated (Annual, Monthly, Weekly…). Blank = annual. The original figure is kept on the income worksheet.",
+        aliases: ["income period", "income frequency", "frequency", "pay period", "period"],
+        example: "Annual", fixed: "period" },
       { key: "hhSize", label: "Household size", required: false, hint: "Defaults to 1",
         aliases: ["hh size", "hhsize", "household size", "family size", "size"], example: "3" },
       { key: "phone", label: "Phone", required: false, hint: "",
