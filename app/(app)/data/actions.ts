@@ -11,7 +11,7 @@ import { audit, getPrograms } from "@/lib/access";
 import { programType } from "@/lib/program-types";
 import { kvGet, kvSet, nextClientId } from "@/lib/data/core";
 import { importTemplate } from "@/lib/import-templates";
-import { getActiveFpl, getFplHistory } from "@/lib/fpl";
+import { getActiveFpl, getFplHistory, scheduleYearOn } from "@/lib/fpl";
 import { canonicalCharacteristic } from "@/lib/csbg-catalog";
 import { fmt, shortDate, todayIso } from "@/lib/format";
 
@@ -153,7 +153,8 @@ export async function commitImport(
     const existing = await db.select({ first: t.clients.first, last: t.clients.last, dob: t.clients.dob }).from(t.clients);
     const seen = new Set(existing.map((c) => `${c.first.toLowerCase()}|${c.last.toLowerCase()}|${c.dob}`));
     const active = await getActiveFpl(); // default when a row names no guideline year
-    const scheduleYears = new Set((await getFplHistory()).map((s) => s.year));
+    const schedules = await getFplHistory();
+    const scheduleYears = new Set(schedules.map((s) => s.year));
     // AR 3.0 taxonomy — a service reference resolves by code or exact label
     const serviceByRef = new Map<string, string>();
     for (const s of await db.select().from(t.services)) {
@@ -185,17 +186,34 @@ export async function commitImport(
       const enrolledRaw = cell(row, "enrolled");
       const enrolled = enrolledRaw ? parseDateIso(enrolledRaw) : today;
       if (!enrolled) { skip(rowNo, `enrollment date “${enrolledRaw}” — use a format like 2025-10-12`); continue; }
-      // Poverty-guideline year: from the fplYear column/fixed value if given
-      // (must match a configured schedule), otherwise the active schedule.
+      // Poverty-guideline year: a bare year must match a configured schedule;
+      // a date (or month) resolves to the schedule IN FORCE that day — so a
+      // mapped assessment/certification date column pins each row correctly.
+      // Blank (and no fixed value) pins to the active schedule.
       const fplYearRaw = cell(row, "fplYear");
       let fplYear = active.year;
       if (fplYearRaw) {
-        const y = Number(fplYearRaw.replace(/[^0-9]/g, ""));
-        if (!Number.isInteger(y) || !scheduleYears.has(y)) {
-          skip(rowNo, `poverty-guideline year “${fplYearRaw}” isn't a configured FPL schedule`);
-          continue;
+        if (/^\d{4}$/.test(fplYearRaw)) {
+          const y = Number(fplYearRaw);
+          if (!scheduleYears.has(y)) {
+            skip(rowNo, `poverty-guideline year “${fplYearRaw}” isn't a configured FPL schedule`);
+            continue;
+          }
+          fplYear = y;
+        } else {
+          const month = parseMonth(fplYearRaw);
+          const iso = parseDateIso(fplYearRaw) ?? (month ? `${month}-01` : null);
+          if (!iso) {
+            skip(rowNo, `poverty-guideline year “${fplYearRaw}” — use a year (2024) or a date like 2024-06-08`);
+            continue;
+          }
+          const inferred = scheduleYearOn(schedules, iso);
+          if (inferred === null) {
+            skip(rowNo, `${iso} predates the oldest configured FPL schedule — add the older schedule in Settings → FPL`);
+            continue;
+          }
+          fplYear = inferred;
         }
-        fplYear = y;
       }
       // Service attribution: an optional per-row (or fixed) service logs one
       // service_log entry on the new client. Validate before anything lands.

@@ -35,6 +35,21 @@ export async function fplSchedule(year?: number | null): Promise<FplSchedule> {
 
 export type ScheduleFigures = Pick<FplSchedule, "base" | "perAdditional">;
 
+/** Guideline year IN FORCE on an ISO date: the schedule with the latest
+    `effective` on or before it (guidelines take effect mid-January, so early
+    January belongs to the prior year's schedule). Null when the date predates
+    every configured schedule. */
+export function scheduleYearOn(
+  schedules: Array<Pick<FplSchedule, "year" | "effective">>,
+  isoDate: string,
+): number | null {
+  let best: { year: number; effective: string } | null = null;
+  for (const s of schedules) {
+    if (s.effective <= isoDate && (!best || s.effective > best.effective)) best = s;
+  }
+  return best?.year ?? null;
+}
+
 /** Annual guideline dollars for a household size under one schedule. */
 export function annualForSchedule(s: ScheduleFigures, size: number): number {
   return s.base + s.perAdditional * (Math.max(1, size) - 1);

@@ -70,7 +70,7 @@ export const IMPORT_TEMPLATES: ImportTemplate[] = [
       { key: "hhType", label: "Household type (D9)", required: false, hint: "Instrument answer or close variant",
         aliases: ["hh type", "hhtype", "household type", "family type"], example: "Single Parent Female" },
       { key: "fplYear", label: "Poverty-guideline year", required: false,
-        hint: "Year income was assessed — must match a configured FPL schedule. Blank uses the active schedule.",
+        hint: "A year (2024) — or map a date column and each row pins to the schedule in force that day. Blank uses the active schedule.",
         aliases: ["fpl year", "poverty year", "guideline year", "poverty guideline year", "assessment year", "fpl"],
         example: "2025", fixed: "year" },
       { key: "service", label: "Service provided", required: false,

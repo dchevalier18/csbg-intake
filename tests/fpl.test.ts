@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { annualForSchedule, pctForSchedule, statusForSchedule } from "@/lib/fpl";
+import { annualForSchedule, pctForSchedule, scheduleYearOn, statusForSchedule } from "@/lib/fpl";
 import { FPL_BANDS, fplBand } from "@/lib/csbg-catalog";
 import type { FplSchedule } from "@/db/schema";
 
@@ -65,6 +65,38 @@ describe("statusForSchedule (eligibility vs ceiling)", () => {
   it("reports the band label from the shared catalog", () => {
     const s = statusForSchedule(FPL_2025, 15650 * 0.4, 1, 125);
     expect(s.band).toBe(FPL_BANDS[0]);
+  });
+});
+
+describe("scheduleYearOn (point-in-time schedule resolution)", () => {
+  // published effective dates: guidelines take force mid-January
+  const SCHEDULES = [
+    { year: 2023, effective: "2023-01-19" },
+    { year: 2024, effective: "2024-01-17" },
+    { year: 2025, effective: "2025-01-15" },
+  ];
+
+  it("resolves a mid-year date to that year's schedule", () => {
+    expect(scheduleYearOn(SCHEDULES, "2024-06-08")).toBe(2024);
+    expect(scheduleYearOn(SCHEDULES, "2025-12-31")).toBe(2025);
+  });
+
+  it("keeps early January on the PRIOR year's schedule", () => {
+    expect(scheduleYearOn(SCHEDULES, "2025-01-05")).toBe(2024);
+    expect(scheduleYearOn(SCHEDULES, "2024-01-16")).toBe(2023);
+  });
+
+  it("switches over on the effective date itself", () => {
+    expect(scheduleYearOn(SCHEDULES, "2025-01-15")).toBe(2025);
+  });
+
+  it("returns null for dates before every configured schedule", () => {
+    expect(scheduleYearOn(SCHEDULES, "2023-01-18")).toBeNull();
+    expect(scheduleYearOn([], "2024-06-08")).toBeNull();
+  });
+
+  it("is order-independent", () => {
+    expect(scheduleYearOn([...SCHEDULES].reverse(), "2024-06-08")).toBe(2024);
   });
 });
 
