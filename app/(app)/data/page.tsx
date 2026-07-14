@@ -16,6 +16,9 @@ export default async function DataPage() {
 
   const programs = (await getPrograms()).map((p) => ({ id: p.id, short: p.short, name: p.name }));
   const fplYears = (await getFplHistory()).map((s) => s.year);
+  const services = (await db.select().from(t.services).orderBy(t.services.sort))
+    .filter((s) => s.active === 1)
+    .map((s) => ({ code: s.code, label: s.label }));
 
   const staff = new Map((await getStaff()).map((s) => [s.id, s.initials]));
   const importJobs = (await db.select().from(t.importJobs)
@@ -48,6 +51,7 @@ export default async function DataPage() {
       importJobs={importJobs}
       programs={programs}
       fplYears={fplYears}
+      services={services}
     />
   );
 }

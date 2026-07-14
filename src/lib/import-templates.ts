@@ -17,8 +17,9 @@ export interface ImportField {
   /* When a field has no matching column, the client-migration import lets you
      set one fixed value for the whole file. `fixed` picks the widget:
      "program" = program dropdown, "year" = FPL-schedule-year dropdown,
-     "text" (default) = free text. Only surfaced for the clients template. */
-  fixed?: "text" | "program" | "year";
+     "service" = AR 3.0 service dropdown, "text" (default) = free text.
+     Only surfaced for the clients template. */
+  fixed?: "text" | "program" | "year" | "service";
 }
 
 export interface ImportTemplate {
@@ -72,6 +73,13 @@ export const IMPORT_TEMPLATES: ImportTemplate[] = [
         hint: "Year income was assessed — must match a configured FPL schedule. Blank uses the active schedule.",
         aliases: ["fpl year", "poverty year", "guideline year", "poverty guideline year", "assessment year", "fpl"],
         example: "2025", fixed: "year" },
+      { key: "service", label: "Service provided", required: false,
+        hint: "AR 3.0 code (SRV 4d) or exact label — logs one service to each imported client",
+        aliases: ["service", "service code", "srv", "service provided", "service received"],
+        example: "SDA 1a", fixed: "service" },
+      { key: "serviceDate", label: "Service date", required: false, hint: "Defaults to the enrollment date",
+        aliases: ["service date", "date of service", "dos", "served", "served on"],
+        example: "2026-01-15" },
     ],
   },
   {

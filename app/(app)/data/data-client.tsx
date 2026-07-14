@@ -44,13 +44,15 @@ const tone: Record<string, string> = { connected: "sage", attention: "amber", re
 const label: Record<string, string> = { connected: "Connected", attention: "Needs attention", ready: "Ready" };
 
 export interface ProgramOption { id: string; short: string; name: string; }
+export interface ServiceOption { code: string; label: string; }
 
-export function DataClient({ integrations, matching, importJobs, programs, fplYears }: {
+export function DataClient({ integrations, matching, importJobs, programs, fplYears, services }: {
   integrations: IntegrationRow[];
   matching: MatchingStats;
   importJobs: ImportJobRow[];
   programs: ProgramOption[];
   fplYears: number[];
+  services: ServiceOption[];
 }) {
   const toast = useToast();
   const router = useRouter();
@@ -160,7 +162,7 @@ export function DataClient({ integrations, matching, importJobs, programs, fplYe
         </div>
       </Panel>
 
-      {wizardOpen ? <ImportWizard onClose={() => setWizardOpen(false)} toast={toast} programs={programs} fplYears={fplYears} /> : null}
+      {wizardOpen ? <ImportWizard onClose={() => setWizardOpen(false)} toast={toast} programs={programs} fplYears={fplYears} services={services} /> : null}
 
       {undoJob ? (
         <Modal title="Undo this import?" width={460} onClose={() => { if (!undoPending) setUndoJob(null); }}>
@@ -189,11 +191,13 @@ export function DataClient({ integrations, matching, importJobs, programs, fplYe
 }
 
 /* One fixed value applied to every imported row when a field has no column.
-   Program and poverty-year get controlled dropdowns; everything else is text. */
-function FixedValueInput({ field, programs, fplYears, value, onChange }: {
+   Program, poverty-year, and service get controlled dropdowns; everything
+   else is text. */
+function FixedValueInput({ field, programs, fplYears, services, value, onChange }: {
   field: ImportField;
   programs: ProgramOption[];
   fplYears: number[];
+  services: ServiceOption[];
   value: string;
   onChange: (v: string) => void;
 }) {
@@ -210,6 +214,14 @@ function FixedValueInput({ field, programs, fplYears, value, onChange }: {
       <select value={value} onChange={(e) => onChange(e.target.value)} aria-label={`Set ${field.label} for all rows`}>
         <option value="">— use the active schedule —</option>
         {fplYears.map((y) => <option key={y} value={String(y)}>{y}</option>)}
+      </select>
+    );
+  }
+  if (field.fixed === "service") {
+    return (
+      <select value={value} onChange={(e) => onChange(e.target.value)} aria-label={`Set ${field.label} for all rows`}>
+        <option value="">— no service logged —</option>
+        {services.map((s) => <option key={s.code} value={s.code}>{s.code} · {s.label}</option>)}
       </select>
     );
   }
@@ -242,8 +254,8 @@ function downloadTemplate(tp: ImportTemplate) {
 
 type WizardStep = "pick" | "map" | "done";
 
-function ImportWizard({ onClose, toast, programs, fplYears }: {
-  onClose: () => void; toast: (msg: string) => void; programs: ProgramOption[]; fplYears: number[];
+function ImportWizard({ onClose, toast, programs, fplYears, services }: {
+  onClose: () => void; toast: (msg: string) => void; programs: ProgramOption[]; fplYears: number[]; services: ServiceOption[];
 }) {
   const [pending, startTransition] = useTransition();
   const [step, setStep] = useState<WizardStep>("pick");
@@ -392,6 +404,7 @@ function ImportWizard({ onClose, toast, programs, fplYears }: {
                         field={f}
                         programs={programs}
                         fplYears={fplYears}
+                        services={services}
                         value={constants[f.key] ?? ""}
                         onChange={(val) =>
                           setConstants((c) => {

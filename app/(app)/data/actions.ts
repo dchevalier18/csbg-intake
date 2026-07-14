@@ -154,6 +154,12 @@ export async function commitImport(
     const seen = new Set(existing.map((c) => `${c.first.toLowerCase()}|${c.last.toLowerCase()}|${c.dob}`));
     const active = await getActiveFpl(); // default when a row names no guideline year
     const scheduleYears = new Set((await getFplHistory()).map((s) => s.year));
+    // AR 3.0 taxonomy — a service reference resolves by code or exact label
+    const serviceByRef = new Map<string, string>();
+    for (const s of await db.select().from(t.services)) {
+      serviceByRef.set(s.code.toLowerCase(), s.code);
+      serviceByRef.set(s.label.toLowerCase(), s.code);
+    }
     const now = new Date().toISOString();
     const today = todayIso();
     // characteristics canonicalize where possible; unmappable values import
@@ -191,6 +197,14 @@ export async function commitImport(
         }
         fplYear = y;
       }
+      // Service attribution: an optional per-row (or fixed) service logs one
+      // service_log entry on the new client. Validate before anything lands.
+      const serviceRef = cell(row, "service");
+      const serviceCode = serviceRef ? serviceByRef.get(serviceRef.toLowerCase()) : undefined;
+      if (serviceRef && !serviceCode) { skip(rowNo, `no service matches “${serviceRef}” — use an AR 3.0 code or exact label`); continue; }
+      const serviceDateRaw = cell(row, "serviceDate");
+      const serviceDate = serviceDateRaw ? parseDateIso(serviceDateRaw) : enrolled;
+      if (!serviceDate) { skip(rowNo, `service date “${serviceDateRaw}” — use a format like 2026-01-15`); continue; }
 
       const clientId = await nextClientId();
       await db.insert(t.clients).values({
@@ -216,6 +230,16 @@ export async function commitImport(
         createdAt: now,
       });
       await db.insert(t.clientPrograms).values({ clientId, programId });
+      if (serviceCode) {
+        await db.insert(t.serviceLog).values({
+          date: serviceDate,
+          clientId,
+          code: serviceCode,
+          programId,
+          staffId: user.id,
+          note: "Imported with client record",
+        });
+      }
       seen.add(key);
       createdClientIds.push(clientId);
       imported++;
