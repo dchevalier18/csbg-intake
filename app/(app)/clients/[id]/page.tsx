@@ -1,12 +1,12 @@
 import { eq, desc, asc } from "drizzle-orm";
 import { db, t } from "@/db";
 import { requireUser } from "@/lib/auth";
-import { visibleClient, visibleProgramIds, visiblePrograms, getPrograms } from "@/lib/access";
+import { visibleClient, visibleProgramIds, visiblePrograms, getPrograms , orgFY} from "@/lib/access";
 import { getOrg, getEnabledIntakeFields, listValuesFor, programServiceRestrictions, programCeiling, requiredDocKeys, OPEN_STAGES } from "@/lib/data/core";
 import { fplStatusFor, getActiveFpl } from "@/lib/fpl";
 import { completenessItems } from "@/lib/completeness";
 import { fnpiByCode, serviceByCode } from "@/lib/csbg-catalog";
-import { ageFromDob, currentFY, longDate, money, shortDate, todayIso } from "@/lib/format";
+import { ageFromDob, longDate, money, shortDate, todayIso } from "@/lib/format";
 import { Restricted } from "@/components/ui";
 import { ClientProfile, type GapField } from "./profile-client";
 
@@ -20,7 +20,7 @@ export default async function ClientProfilePage({ params }: { params: Promise<{ 
   if (!c) return <Restricted what="this client record" />;
 
   const org = await getOrg();
-  const fy = currentFY();
+  const fy = await orgFY();
   const st = await fplStatusFor(c.income, c.hhSize, c.fplYear, org.csbgCeiling);
   const fields = await getEnabledIntakeFields();
   const items = completenessItems(c, fields);

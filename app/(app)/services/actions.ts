@@ -6,9 +6,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { db, t } from "@/db";
 import { requireUser } from "@/lib/auth";
-import { audit, userCanSeeProgram, visibleClient } from "@/lib/access";
+import { audit, userCanSeeProgram, visibleClient , orgFY} from "@/lib/access";
 import { serviceAllowedForProgram } from "@/lib/data/core";
-import { currentFY, todayIso } from "@/lib/format";
+import { todayIso } from "@/lib/format";
 import { checkUpload } from "@/lib/uploads";
 
 export interface ServiceEntryResult {
@@ -97,5 +97,5 @@ export async function addServiceEntry(input: {
   revalidatePath("/services");
   revalidatePath(`/clients/${clientId}`);
 
-  return { ok: true, message: `Service logged — mapped to ${code} for the ${currentFY().short} rollup.` };
+  return { ok: true, message: `Service logged — mapped to ${code} for the ${(await orgFY()).short} rollup.` };
 }

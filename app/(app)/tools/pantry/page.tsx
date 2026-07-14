@@ -1,8 +1,8 @@
 import { requireUser } from "@/lib/auth";
 import { Restricted } from "@/components/ui";
-import { userHasCap, visibleProgramIds } from "@/lib/access";
+import { userHasCap, visibleProgramIds , orgFY} from "@/lib/access";
 import { kvGet } from "@/lib/data/core";
-import { currentFY, monthName, prevMonthYm, shortDate, todayIso } from "@/lib/format";
+import { monthName, prevMonthYm, shortDate, todayIso } from "@/lib/format";
 import { db, t } from "@/db";
 import { eq } from "drizzle-orm";
 import PantryClient, { type PantryRow, type ShfbStats } from "./pantry-client";
@@ -49,7 +49,7 @@ export default async function PantryPage() {
   if (kv.agencies > 0) {
     stats = { ...kv, reportsThisMonth: { received, missing: rows.length - received } };
   } else {
-    const fy = currentFY();
+    const fy = await orgFY();
     const agencyIds = new Set(agencies.map((a) => a.id));
     const fyLbs = (await db.select().from(t.pantryReports))
       .filter((r) => r.status === "received" && agencyIds.has(r.agencyId)

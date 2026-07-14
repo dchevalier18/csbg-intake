@@ -4,10 +4,10 @@ import { revalidatePath } from "next/cache";
 import { and, eq } from "drizzle-orm";
 import { db, t } from "@/db";
 import { isAdmin, requireUser } from "@/lib/auth";
-import { audit, userCanSeeProgram, userHasCap, visibleClient, visiblePrograms } from "@/lib/access";
+import { audit, userCanSeeProgram, userHasCap, visibleClient, visiblePrograms , orgFY} from "@/lib/access";
 import { programType } from "@/lib/program-types";
 import { kvGet, kvSet } from "@/lib/data/core";
-import { currentFY, money, todayIso } from "@/lib/format";
+import { money, todayIso } from "@/lib/format";
 
 interface Result { ok: boolean; message: string }
 
@@ -75,7 +75,7 @@ export async function advanceJob(jobId: string): Promise<Result> {
       });
       // the completed unit is a client-level FNPI 4f outcome (households improved
       // energy efficiency) — upsert within the FY so the household counts once
-      const fy = currentFY();
+      const fy = await orgFY();
       const existing = (await db.select().from(t.outcomeLog)
         .where(and(eq(t.outcomeLog.clientId, job.clientId), eq(t.outcomeLog.code, "FNPI 4f"), eq(t.outcomeLog.programId, job.programId))))
         .find((o) => o.date >= fy.start && o.date <= fy.end);

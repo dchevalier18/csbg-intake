@@ -1,8 +1,8 @@
 import { requireUser } from "@/lib/auth";
 import { Restricted } from "@/components/ui";
-import { getPrograms, userHasCap, visibleClients, visibleProgramIds, visiblePrograms } from "@/lib/access";
+import { getPrograms, userHasCap, visibleClients, visibleProgramIds, visiblePrograms , orgFY} from "@/lib/access";
 import { kvGet } from "@/lib/data/core";
-import { currentFY, todayIso } from "@/lib/format";
+import { todayIso } from "@/lib/format";
 import { db, t } from "@/db";
 import VolunteersClient, { type VolRow, type VolStats } from "./volunteers-client";
 
@@ -52,7 +52,7 @@ export default async function VolunteersPage() {
       rows={rows}
       programs={myPrograms}
       clients={clients}
-      fyShort={currentFY().short}
+      fyShort={(await orgFY()).short}
       today={todayIso()}
     />
   );

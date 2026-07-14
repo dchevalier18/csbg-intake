@@ -53,28 +53,41 @@ export function initialsOf(name: string): string {
   return name.split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase();
 }
 
-/* ---------- Federal fiscal year (Oct 1 – Sep 30) ---------- */
+/* ---------- Fiscal year (start month set in agency settings) ---------- */
 export interface FiscalYear {
-  label: string;     // "FY 2026"
-  short: string;     // "FY26"
-  range: string;     // "Oct 1, 2025 – Sep 30, 2026"
-  start: string;     // ISO
-  end: string;       // ISO
+  label: string;      // "FY 2026"
+  short: string;      // "FY26"
+  range: string;      // "Oct 1, 2025 – Sep 30, 2026"
+  shortRange: string; // "Oct 1 – Sep 30" (yearless, for the topbar chip)
+  start: string;      // ISO
+  end: string;        // ISO
   pctElapsed: number;
 }
 
-export function currentFY(now = new Date()): FiscalYear {
-  const fy = now.getMonth() >= 9 ? now.getFullYear() + 1 : now.getFullYear();
-  const start = new Date(fy - 1, 9, 1);
-  const end = new Date(fy, 8, 30);
+/** Start-month options offered on Settings → Organization. */
+export const FY_START_MONTHS: Record<string, number> = { January: 0, April: 3, July: 6, October: 9 };
+
+/** Fiscal year containing `now` for an agency whose FY starts in `fyStart`.
+    Named for the calendar year it ENDS in (federal convention: Oct 2025 –
+    Sep 2026 = FY 2026); a January start coincides with the calendar year. */
+export function currentFY(now = new Date(), fyStart = "October"): FiscalYear {
+  const sm = FY_START_MONTHS[fyStart] ?? 9;
+  const fy = sm === 0 || now.getMonth() < sm ? now.getFullYear() : now.getFullYear() + 1;
+  const startYear = sm === 0 ? fy : fy - 1;
+  const start = new Date(startYear, sm, 1);
+  const end = new Date(startYear + 1, sm, 0); // last day of the month before the next FY starts
   const pctElapsed = Math.min(100, Math.max(0,
     Math.round(((now.getTime() - start.getTime()) / (end.getTime() - start.getTime())) * 100)));
+  const d = (x: Date) => x.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  const md = (x: Date) => x.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  const iso = (x: Date) => `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`;
   return {
     label: `FY ${fy}`,
     short: `FY${String(fy).slice(2)}`,
-    range: `Oct 1, ${fy - 1} – Sep 30, ${fy}`,
-    start: `${fy - 1}-10-01`,
-    end: `${fy}-09-30`,
+    range: `${d(start)} – ${d(end)}`,
+    shortRange: `${md(start)} – ${md(end)}`,
+    start: iso(start),
+    end: iso(end),
     pctElapsed,
   };
 }

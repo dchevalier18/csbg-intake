@@ -8,7 +8,7 @@ import { Chip, Kpi, Panel, Field, ProgramDot } from "@/components/ui";
 import { Seg, Modal } from "@/components/ui-client";
 import { I } from "@/components/icons";
 import { useToast } from "@/components/toast";
-import { money, shortDate, currentFY } from "@/lib/format";
+import { money, shortDate } from "@/lib/format";
 import { reopenApplication, updateApplication, type ApplicationUpdatePayload } from "../eligibility/actions";
 import {
   IntakeDetailsForm,
@@ -48,11 +48,12 @@ const AMBER_TEXT = "#8A6410";
 
 const FILTERS = ["All", "Eligible today", "Over ceiling"] as const;
 
-export default function DenialsClient({ rows, lists, fields, programs }: {
+export default function DenialsClient({ rows, lists, fields, programs, fy }: {
   rows: DenialRow[];
   lists: Record<string, string[]>;       // answer lists by key
   fields: IntakeFieldDef[];              // enabled intake fields (characteristics)
   programs: ProgramOption[];             // visible programs — reopen targets
+  fy: { label: string; start: string };  // agency fiscal year (from settings)
 }) {
   const toast = useToast();
   const [openId, setOpenId] = useState<string | null>(null);
@@ -60,7 +61,6 @@ export default function DenialsClient({ rows, lists, fields, programs }: {
   const [, startTransition] = useTransition();
   const open = rows.find((a) => a.id === openId);
 
-  const fy = currentFY();
   const deniedThisFY = rows.filter((a) => a.denied.on >= fy.start).length;
   const eligibleToday = rows.filter((a) => a.fpl.eligible).length;
 

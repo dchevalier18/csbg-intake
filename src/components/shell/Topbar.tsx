@@ -30,9 +30,10 @@ const STR = {
 };
 interface SearchHit { id: string; name: string; sub: string; initial: string }
 
-export function Topbar({ user, fyLabel, onSignOut }: {
+export function Topbar({ user, fyLabel, fyRange, onSignOut }: {
   user: TopbarUser;
   fyLabel: string;
+  fyRange: string;
   onSignOut: () => Promise<void>;
 }) {
   const router = useRouter();
@@ -87,7 +88,7 @@ export function Topbar({ user, fyLabel, onSignOut }: {
         ) : null}
       </div>
       <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
-        <span className="fy-chip">{fyLabel} · OCT 1 – SEP 30</span>
+        <span className="fy-chip">{fyLabel} · {fyRange.toUpperCase()}</span>
         <div style={{ position: "relative" }} ref={wrapRef}>
           <button
             type="button"

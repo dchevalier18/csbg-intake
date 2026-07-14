@@ -14,7 +14,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   const user = await requireUser();
   const org = (await db.select().from(t.organization).where(eq(t.organization.id, 1)))[0]!;
   const navPrograms = await visiblePrograms(user);
-  const fy = currentFY();
+  const fy = currentFY(new Date(), org.fyStart);
 
   // open applications visible to this user (terminal stages excluded)
   const visibleIds = navPrograms.map((p) => p.id);
@@ -40,6 +40,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
           <Topbar
             user={{ name: user.name, role: user.role, initials: user.initials, locale: user.locale }}
             fyLabel={fy.label}
+            fyRange={fy.shortRange}
             onSignOut={signOut}
           />
           {children}

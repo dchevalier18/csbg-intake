@@ -3,6 +3,7 @@ import { db, t } from "@/db";
 import { eq, asc, inArray } from "drizzle-orm";
 import type { User, Program, Client } from "@/db/schema";
 import { programType } from "@/lib/program-types";
+import { currentFY, type FiscalYear } from "@/lib/format";
 
 /* ============================================================
    Access control — program assignment gates everything a user
@@ -74,6 +75,13 @@ export async function visibleClient(user: User, clientId: string): Promise<Clien
   const ids = await visibleProgramIds(user);
   if (!programIds.some((p) => ids.has(p))) return undefined;
   return { ...c, programIds };
+}
+
+/** The agency's CURRENT fiscal year, honoring the FY start month from
+    Settings → Organization. Server-side counterpart to currentFY(). */
+export async function orgFY(): Promise<FiscalYear> {
+  const org = (await db.select().from(t.organization).where(eq(t.organization.id, 1)))[0];
+  return currentFY(new Date(), org?.fyStart);
 }
 
 /** Audit-log helper. */

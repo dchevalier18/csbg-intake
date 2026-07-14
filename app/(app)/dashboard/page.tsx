@@ -1,10 +1,10 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
-import { visibleClients, visibleProgramIds, getPrograms } from "@/lib/access";
+import { visibleClients, visibleProgramIds, getPrograms , orgFY} from "@/lib/access";
 import { openApplications, applicationDocList, kvGet, getEnabledIntakeFields } from "@/lib/data/core";
 import { completenessItems, completenessPct } from "@/lib/completeness";
 import { DOMAINS } from "@/lib/csbg-catalog";
-import { fmt, shortDate, todayIso, currentFY } from "@/lib/format";
+import { fmt, shortDate, todayIso } from "@/lib/format";
 import { Kpi, Panel, Chip, CodeChip, Meter, PageHead } from "@/components/ui";
 import { I } from "@/components/icons";
 import { FollowupsTable, type FollowupRow } from "./dashboard-client";
@@ -17,7 +17,7 @@ function addDaysIso(iso: string, days: number): string {
 
 export default async function DashboardPage() {
   const user = await requireUser();
-  const fy = currentFY();
+  const fy = await orgFY();
   const today = todayIso();
 
   const programs = await getPrograms();

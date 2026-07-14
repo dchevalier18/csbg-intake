@@ -2,12 +2,12 @@ import Link from "next/link";
 import { eq, inArray } from "drizzle-orm";
 import { db, t } from "@/db";
 import { requireUser } from "@/lib/auth";
-import { getProgram, userCanSeeProgram } from "@/lib/access";
+import { getProgram, userCanSeeProgram , orgFY} from "@/lib/access";
 import { getEnabledIntakeFields, getOrg, getStaff, openApplications } from "@/lib/data/core";
 import { fplStatusFor } from "@/lib/fpl";
 import { completenessPct } from "@/lib/completeness";
 import { CAP_TOOLS, programType } from "@/lib/program-types";
-import { currentFY, shortDate } from "@/lib/format";
+import { shortDate } from "@/lib/format";
 import { Chip, CodeChip, Kpi, Panel, Restricted } from "@/components/ui";
 import { I } from "@/components/icons";
 import { MembersTable, type MemberRow } from "./program-client";
@@ -27,7 +27,7 @@ export default async function ProgramPage({ params }: { params: Promise<{ id: st
   const type = programType(p.type);
   const org = await getOrg();
   const fields = await getEnabledIntakeFields();
-  const fy = currentFY();
+  const fy = await orgFY();
 
   // enrolled clients on this program (access already verified above)
   const memberIds = (await db.select().from(t.clientPrograms)

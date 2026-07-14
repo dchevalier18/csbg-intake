@@ -1,9 +1,10 @@
 import "server-only";
 import { db, t } from "@/db";
 import { getOrg, getEnabledIntakeFields, kvGet } from "@/lib/data/core";
+import { orgFY } from "@/lib/access";
 import { fplStatusFor } from "@/lib/fpl";
 import { completenessPct } from "@/lib/completeness";
-import { ageFromDob, currentFY, todayIso } from "@/lib/format";
+import { ageFromDob, todayIso } from "@/lib/format";
 import {
   FPL_BANDS, domainById, fnpiByCode, characteristicByCode, canonicalCharacteristic,
 } from "@/lib/csbg-catalog";
@@ -81,7 +82,7 @@ function shortServiceLabel(label: string): string {
 }
 
 export async function buildRollup(): Promise<ReportRollup> {
-  const fy = currentFY();
+  const fy = await orgFY();
   const org = await getOrg();
   const fields = await getEnabledIntakeFields();
   const clients = (await db.select().from(t.clients)).filter((c) => c.status === "active");

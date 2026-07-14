@@ -2,7 +2,7 @@ import { requireUser } from "@/lib/auth";
 import { visiblePrograms } from "@/lib/access";
 import { getEnabledIntakeFields, getListsWithValues, getOrg, getStaff, deniedApplications, applicationDocList } from "@/lib/data/core";
 import { fplStatusFor } from "@/lib/fpl";
-import { localDateOf } from "@/lib/format";
+import { currentFY, localDateOf } from "@/lib/format";
 import { Restricted } from "@/components/ui";
 import DenialsClient, { type DenialRow } from "./denials-client";
 
@@ -83,12 +83,14 @@ export default async function DenialsPage() {
     };
   }));
 
+  const fy = currentFY(new Date(), org.fyStart);
   return (
     <DenialsClient
       rows={rows}
       lists={lists}
       fields={fields}
       programs={programs.map((p) => ({ id: p.id, name: p.name, ceiling: p.fplCeiling ?? org.csbgCeiling }))}
+      fy={{ label: fy.label, start: fy.start }}
     />
   );
 }

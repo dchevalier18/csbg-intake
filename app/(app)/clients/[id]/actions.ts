@@ -8,11 +8,11 @@ import { revalidatePath } from "next/cache";
 import { and, eq, inArray } from "drizzle-orm";
 import { db, t } from "@/db";
 import { requireUser } from "@/lib/auth";
-import { visibleClient, userCanSeeProgram, getProgram, audit } from "@/lib/access";
+import { visibleClient, userCanSeeProgram, getProgram, audit , orgFY} from "@/lib/access";
 import { getEnabledIntakeFields, nextApplicationId, programCeiling, requiredDocKeys, OPEN_STAGES } from "@/lib/data/core";
 import { getActiveFpl, fplStatusFor } from "@/lib/fpl";
 import { fnpiByCode } from "@/lib/csbg-catalog";
-import { currentFY, todayIso } from "@/lib/format";
+import { todayIso } from "@/lib/format";
 import type { Client } from "@/db/schema";
 
 export interface ActionResult { ok: boolean; message: string }
@@ -64,7 +64,7 @@ export async function recordOutcome(clientId: string, input: {
     return { ok: false, message: "Your account isn't assigned to that program." };
   }
 
-  const fy = currentFY();
+  const fy = await orgFY();
   const today = todayIso();
   // Key the FY upsert on the program too: recording under one program must never
   // silently rewrite (and re-attribute) a row another program recorded — possibly
