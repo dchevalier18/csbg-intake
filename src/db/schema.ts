@@ -338,6 +338,9 @@ export interface HeldClientPayload {
     // before these import columns existed won't carry them)
     edu?: string | null; work?: string | null; insurance?: string | null;
     military?: string | null; disability?: number | null; incomeSrc?: string | null;
+    county?: string | null;
+    /** staff id resolved from the sheet's caseworker column (blank = resolver) */
+    caseworkerId?: string | null;
     custom?: Record<string, string>;
     income: number; incomeWorksheet?: IncomeWorksheet;
     enrolled: string; fplYear: number;

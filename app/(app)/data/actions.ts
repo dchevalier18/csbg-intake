@@ -185,6 +185,18 @@ export async function commitImport(
       serviceByRef.set(s.code.toLowerCase(), s.code);
       serviceByRef.set(s.label.toLowerCase(), s.code);
     }
+    // caseworker column resolves by staff name, username, or initials
+    const staffByRef = new Map<string, string>();
+    for (const u of await db.select().from(t.users).where(eq(t.users.active, 1))) {
+      staffByRef.set(u.name.toLowerCase(), u.id);
+      staffByRef.set(u.username.toLowerCase(), u.id);
+      staffByRef.set(u.initials.toLowerCase(), u.id);
+      staffByRef.set(u.id.toLowerCase(), u.id);
+    }
+    // legacy-ID linkage: a (system, id) pair already on file means the row
+    // was imported before — idempotent re-imports skip it by ID, not by name
+    const extPairs = new Set(
+      (await db.select().from(t.clientExternalIds)).map((r) => `${r.system}|${r.externalId.toLowerCase()}`));
     const now = new Date().toISOString();
     const today = todayIso();
     // characteristics canonicalize where possible; unmappable values import
@@ -266,6 +278,24 @@ export async function commitImport(
       const serviceDateRaw = cell(row, "serviceDate");
       const serviceDate = serviceDateRaw ? parseDateIso(serviceDateRaw) : enrolled;
       if (!serviceDate) { skip(rowNo, `service date “${serviceDateRaw}” — use a format like 2026-01-15`); continue; }
+      // Caseworker assignment: resolves by name/username/initials; blank = importer
+      const caseworkerRaw = cell(row, "caseworker");
+      let caseworkerId = user.id;
+      if (caseworkerRaw) {
+        const match = staffByRef.get(caseworkerRaw.toLowerCase());
+        if (!match) { skip(rowNo, `no staff member matches “${caseworkerRaw}” — use their name, username, or initials`); continue; }
+        caseworkerId = match;
+      }
+      // Legacy-ID linkage: keeps the source system's record ID as a durable
+      // cross-reference and makes re-imports of the same export idempotent
+      const legacyIdRaw = cell(row, "legacyId");
+      const legacySystem = (cell(row, "legacySystem") || "legacy").trim().toLowerCase();
+      const legacyPair = legacyIdRaw ? `${legacySystem}|${legacyIdRaw.toLowerCase()}` : null;
+      if (legacyPair && extPairs.has(legacyPair)) {
+        skip(rowNo, `legacy ID “${legacyIdRaw}” (${legacySystem}) is already linked to a client record`);
+        continue;
+      }
+      const externalId = legacyIdRaw ? { system: legacySystem, id: legacyIdRaw } : undefined;
       // Remaining All Characteristics Report fields (C3/C5/C7/C8/D13 + the C4
       // custom field) — the same canonicalize-or-keep treatment the C1/C6/D9/D11
       // columns get, so imported records can be report-complete on day one.
@@ -306,12 +336,14 @@ export async function commitImport(
               first, last, dob,
               phone: cell(row, "phone") || null,
               address: cell(row, "address") || null,
+              county: cell(row, "county") || null,
               sex: canonOr("C1", cell(row, "sex")),
               race: canonOr("C6", cell(row, "race")),
               housing: canonOr("D11", cell(row, "housing")),
               hhType: canonOr("D9", cell(row, "hhType")),
               hhSize,
               edu, work, insurance, military, disability, incomeSrc,
+              caseworkerId,
               custom,
               income: annualIncome,
               incomeWorksheet: worksheet,
@@ -321,9 +353,11 @@ export async function commitImport(
             programId,
             serviceCode: serviceCode || undefined,
             serviceDate: serviceCode ? serviceDate : undefined,
+            externalId,
           },
           candidateIds: possible.map((m) => m.client.id),
         });
+        if (legacyPair) extPairs.add(legacyPair);
         continue;
       }
 
@@ -335,6 +369,7 @@ export async function commitImport(
         dob,
         phone: cell(row, "phone") || null,
         address: cell(row, "address") || null,
+        county: cell(row, "county") || null,
         sex: canonOr("C1", cell(row, "sex")),
         race: canonOr("C6", cell(row, "race")),
         housing: canonOr("D11", cell(row, "housing")),
@@ -343,7 +378,7 @@ export async function commitImport(
         edu, work, insurance, military, disability, incomeSrc,
         income: annualIncome,
         incomeWorksheet: worksheet,
-        caseworkerId: user.id,
+        caseworkerId,
         enrolled,
         fplYear,
         nextFollowUp: null,
@@ -362,6 +397,12 @@ export async function commitImport(
           staffId: user.id,
           note: "Imported with client record",
         });
+      }
+      if (externalId) {
+        await db.insert(t.clientExternalIds)
+          .values({ system: externalId.system, externalId: externalId.id, clientId, linkedAt: now, linkedBy: user.id })
+          .onConflictDoNothing();
+        extPairs.add(legacyPair!);
       }
       seen.add(key);
       createdClientIds.push(clientId);
@@ -686,7 +727,7 @@ export async function resolveMatchReview(id: number, action: ReviewAction): Prom
     await db.insert(t.clients).values({
       id: clientId,
       ...p.client,
-      caseworkerId: user.id,
+      caseworkerId: p.client.caseworkerId ?? user.id,
       nextFollowUp: null,
       flags: ["Migrated record — verify characteristics"],
       custom: p.client.custom ?? {},

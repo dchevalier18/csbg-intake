@@ -23,6 +23,19 @@ describe("downloadable import templates", () => {
     }
   });
 
+  it("client migration carries the full client record beyond the report fields", () => {
+    const clients = IMPORT_TEMPLATES.find((t) => t.id === "clients")!;
+    const keys = new Set(clients.fields.map((f) => f.key));
+    // record-completeness columns: residence county, caseworker assignment,
+    // and the legacy-system ID pair that feeds client_external_ids linkage
+    for (const key of ["county", "caseworker", "legacyId", "legacySystem"]) {
+      expect(keys.has(key), `client migration needs the “${key}” column`).toBe(true);
+    }
+    // ClientTrack's own export headers must auto-map onto the legacy pair
+    const legacy = clients.fields.find((f) => f.key === "legacyId")!;
+    expect(legacy.aliases).toContain("clientid");
+  });
+
   for (const tpl of IMPORT_TEMPLATES) {
     describe(tpl.name, () => {
       it("round-trips through the upload parser with a full auto-map", async () => {

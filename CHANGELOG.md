@@ -6,6 +6,20 @@ tracks a federal instrument or guideline revision) are marked **[compliance]**
 
 ## Unreleased — 0.5.0 (roadmap Phases 1–5)
 
+### Client migration: record-complete imports
+- The client-migration template now covers the full client record, not just
+  the report characteristics: **County** of residence, **Caseworker**
+  assignment (resolves by staff name, username, or initials; blank assigns to
+  the importer), and a **Legacy client ID + Legacy system** pair. The legacy
+  pair writes a durable `client_external_ids` cross-reference — and makes
+  re-imports idempotent: a row whose (system, ID) is already linked skips with
+  a clear reason instead of re-importing under a new name-match. County,
+  caseworker, and legacy system all support the set-one-value-for-every-row
+  shortcut; ClientTrack's own `ClientID` header auto-maps onto the legacy pair.
+- Rows held for duplicate review carry the new fields through resolution:
+  "create new client" honors the sheet's caseworker, and both resolutions
+  link the legacy ID.
+
 ### Duplicate matching becomes real (integration groundwork)
 - **One shared matching engine** (`src/lib/matching.ts`): exact identity =
   normalized name + date of birth; "possible" = same last name plus a matching
