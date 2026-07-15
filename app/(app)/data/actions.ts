@@ -106,6 +106,7 @@ function parseDateIso(s: string): string | null {
 }
 
 const isYes = (s: string): boolean => ["yes", "y", "true", "1", "x"].includes(s.trim().toLowerCase());
+const isNo = (s: string): boolean => ["no", "n", "false", "0", "none"].includes(s.trim().toLowerCase());
 
 /* "Monthly" | "per month" | "biweekly" | "yearly" … → income period id (or null). */
 const PERIOD_ALIASES: Record<string, IncomePeriod> = {
@@ -265,6 +266,32 @@ export async function commitImport(
       const serviceDateRaw = cell(row, "serviceDate");
       const serviceDate = serviceDateRaw ? parseDateIso(serviceDateRaw) : enrolled;
       if (!serviceDate) { skip(rowNo, `service date “${serviceDateRaw}” — use a format like 2026-01-15`); continue; }
+      // Remaining All Characteristics Report fields (C3/C5/C7/C8/D13 + the C4
+      // custom field) — the same canonicalize-or-keep treatment the C1/C6/D9/D11
+      // columns get, so imported records can be report-complete on day one.
+      const edu = canonOr("C3", cell(row, "edu"));
+      const work = canonOr("C8", cell(row, "work"));
+      const military = canonOr("C7", cell(row, "military"));
+      const incomeSrc = canonOr("D13", cell(row, "incomeSrc"));
+      // C5b stores the insurance SOURCE, with "None" meaning uninsured
+      const insuranceRaw = cell(row, "insurance");
+      const insurance = insuranceRaw === "" ? null
+        : isNo(insuranceRaw) || insuranceRaw.trim().toLowerCase() === "uninsured" ? "None"
+        : canonOr("C5b-source", insuranceRaw);
+      const disabilityRaw = cell(row, "disability");
+      let disability: number | null = null;
+      if (disabilityRaw) {
+        if (isYes(disabilityRaw)) disability = 1;
+        else if (isNo(disabilityRaw)) disability = 0;
+        else { skip(rowNo, `disability “${disabilityRaw}” — use Yes or No (blank = unknown)`); continue; }
+      }
+      const dyRaw = cell(row, "disconnectedYouth");
+      const custom: Record<string, string> = {};
+      if (dyRaw) {
+        if (isYes(dyRaw)) custom.disconnectedYouth = "Yes";
+        else if (isNo(dyRaw)) custom.disconnectedYouth = "No";
+        else { skip(rowNo, `disconnected youth “${dyRaw}” — use Yes or No (blank = unknown)`); continue; }
+      }
 
       // Not an exact record, but close to one (same last name + DOB, or a
       // near-miss first name)? Hold the row for human review instead of
@@ -284,6 +311,8 @@ export async function commitImport(
               housing: canonOr("D11", cell(row, "housing")),
               hhType: canonOr("D9", cell(row, "hhType")),
               hhSize,
+              edu, work, insurance, military, disability, incomeSrc,
+              custom,
               income: annualIncome,
               incomeWorksheet: worksheet,
               enrolled,
@@ -311,6 +340,7 @@ export async function commitImport(
         housing: canonOr("D11", cell(row, "housing")),
         hhType: canonOr("D9", cell(row, "hhType")),
         hhSize,
+        edu, work, insurance, military, disability, incomeSrc,
         income: annualIncome,
         incomeWorksheet: worksheet,
         caseworkerId: user.id,
@@ -318,7 +348,7 @@ export async function commitImport(
         fplYear,
         nextFollowUp: null,
         flags: ["Migrated record — verify characteristics"],
-        custom: {},
+        custom,
         status: "active",
         createdAt: now,
       });
@@ -659,7 +689,7 @@ export async function resolveMatchReview(id: number, action: ReviewAction): Prom
       caseworkerId: user.id,
       nextFollowUp: null,
       flags: ["Migrated record — verify characteristics"],
-      custom: {},
+      custom: p.client.custom ?? {},
       status: "active",
       createdAt: now,
     });

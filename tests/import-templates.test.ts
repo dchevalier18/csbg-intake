@@ -8,6 +8,21 @@ describe("downloadable import templates", () => {
       ["clients", "pantry", "pantry-agencies", "seminars", "volunteers"].sort());
   });
 
+  it("client migration carries every All Characteristics Report field (C1-C8, D9-D13)", () => {
+    const clients = IMPORT_TEMPLATES.find((t) => t.id === "clients")!;
+    const keys = new Set(clients.fields.map((f) => f.key));
+    // report characteristic → import field that feeds it (C2 derives from dob,
+    // D10 from hhSize, D12 from income + hhSize + the pinned guideline year)
+    const feeds: Record<string, string> = {
+      C1: "sex", C2: "dob", C3: "edu", C4: "disconnectedYouth", C5a: "disability",
+      C5b: "insurance", C6: "race", C7: "military", C8: "work",
+      D9: "hhType", D10: "hhSize", D11: "housing", D12: "income", D13: "incomeSrc",
+    };
+    for (const [code, key] of Object.entries(feeds)) {
+      expect(keys.has(key), `${code} needs the “${key}” import column`).toBe(true);
+    }
+  });
+
   for (const tpl of IMPORT_TEMPLATES) {
     describe(tpl.name, () => {
       it("round-trips through the upload parser with a full auto-map", async () => {

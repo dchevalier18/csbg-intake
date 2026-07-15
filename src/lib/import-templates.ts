@@ -73,6 +73,27 @@ export const IMPORT_TEMPLATES: ImportTemplate[] = [
         aliases: ["housing", "housing status", "housing situation", "tenure"], example: "Rent" },
       { key: "hhType", label: "Household type (D9)", required: false, hint: "Instrument answer or close variant",
         aliases: ["hh type", "hhtype", "household type", "family type"], example: "Single Parent Female" },
+      { key: "edu", label: "Education (C3)", required: false, hint: "Instrument answer or close variant",
+        aliases: ["education", "education level", "highest education", "highest grade", "edu"],
+        example: "High School Graduate / GED" },
+      { key: "work", label: "Work status (C8)", required: false, hint: "Instrument answer or close variant",
+        aliases: ["work", "work status", "employment", "employment status", "job status"],
+        example: "Employed Part-Time" },
+      { key: "insurance", label: "Health insurance (C5b)", required: false,
+        hint: "Insurance source (Medicaid, Medicare, Employment-Based…) or None",
+        aliases: ["insurance", "health insurance", "insurance source", "coverage", "health coverage"],
+        example: "Medicaid" },
+      { key: "military", label: "Military status (C7)", required: false, hint: "Instrument answer or close variant",
+        aliases: ["military", "military status", "veteran", "veteran status"],
+        example: "Never Served in the Military" },
+      { key: "disability", label: "Disability (C5a)", required: false, hint: "Yes/No — blank = unknown",
+        aliases: ["disability", "disabled", "disability status"], example: "No" },
+      { key: "incomeSrc", label: "Income sources (D13)", required: false, hint: "Instrument answer or close variant",
+        aliases: ["income source", "income sources", "source of income", "d13"],
+        example: "Employment and Non-Cash Benefits" },
+      { key: "disconnectedYouth", label: "Disconnected youth (C4)", required: false,
+        hint: "Yes/No — ages 14-24 neither working nor in school; blank = unknown",
+        aliases: ["disconnected youth", "disconnected", "c4"], example: "No" },
       { key: "fplYear", label: "Poverty-guideline year", required: false,
         hint: "A year (2024) — or map a date column and each row pins to the schedule in force that day. Blank uses the active schedule.",
         aliases: ["fpl year", "poverty year", "guideline year", "poverty guideline year", "assessment year", "fpl"],
@@ -174,23 +195,29 @@ export function templateCsv(tpl: ImportTemplate): string {
 
 const norm = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 
-/** Best-guess column index per template field from the uploaded header row (-1 = unmapped). */
+/** Best-guess column index per template field from the uploaded header row (-1 = unmapped).
+    Every field gets an exact-match attempt before any field falls back to a
+    contains-match — so "Income ($)" can't steal an "Income Sources" header. */
 export function autoMapColumns(tpl: ImportTemplate, headers: string[]): Record<string, number> {
   const normalized = headers.map(norm);
   const mapping: Record<string, number> = {};
   const taken = new Set<number>();
+  const candidatesOf = (f: ImportField) => [norm(f.label), norm(f.key), ...f.aliases.map(norm)];
   for (const f of tpl.fields) {
-    const candidates = [norm(f.label), norm(f.key), ...f.aliases.map(norm)];
     let idx = -1;
-    for (const c of candidates) {
+    for (const c of candidatesOf(f)) {
       const exact = normalized.findIndex((h, i) => h === c && !taken.has(i));
       if (exact !== -1) { idx = exact; break; }
     }
-    if (idx === -1) {
-      // fall back to a contains-match ("Total pounds distributed" → lbs)
-      idx = normalized.findIndex((h, i) =>
-        !taken.has(i) && h.length > 0 && candidates.some((c) => c.length > 2 && h.includes(c)));
-    }
+    mapping[f.key] = idx;
+    if (idx !== -1) taken.add(idx);
+  }
+  for (const f of tpl.fields) {
+    if (mapping[f.key] !== -1) continue;
+    // fall back to a contains-match ("Total pounds distributed" → lbs)
+    const candidates = candidatesOf(f);
+    const idx = normalized.findIndex((h, i) =>
+      !taken.has(i) && h.length > 0 && candidates.some((c) => c.length > 2 && h.includes(c)));
     mapping[f.key] = idx;
     if (idx !== -1) taken.add(idx);
   }

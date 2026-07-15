@@ -334,6 +334,11 @@ export interface HeldClientPayload {
     phone: string | null; address: string | null;
     sex: string | null; race: string | null; housing: string | null;
     hhType: string | null; hhSize: number;
+    // remaining All Characteristics Report fields (optional — rows queued
+    // before these import columns existed won't carry them)
+    edu?: string | null; work?: string | null; insurance?: string | null;
+    military?: string | null; disability?: number | null; incomeSrc?: string | null;
+    custom?: Record<string, string>;
     income: number; incomeWorksheet?: IncomeWorksheet;
     enrolled: string; fplYear: number;
   };
