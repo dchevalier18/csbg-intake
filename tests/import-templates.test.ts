@@ -5,7 +5,7 @@ import { IMPORT_TEMPLATES, autoMapColumns, templateCsv } from "../src/lib/import
 describe("downloadable import templates", () => {
   it("covers every template in the picker", () => {
     expect(IMPORT_TEMPLATES.map((t) => t.id).sort()).toEqual(
-      ["clients", "pantry", "pantry-agencies", "seminars", "volunteers"].sort());
+      ["clients", "pantry", "pantry-agencies", "seminars", "volunteers", "services"].sort());
   });
 
   it("client migration carries every All Characteristics Report field (C1-C8, D9-D13)", () => {
@@ -55,6 +55,7 @@ describe("downloadable import templates", () => {
         // each template's match-or-create guard: the cell the importer keys on
         // either never matches existing data or is blank (both skip with a reason)
         if (tpl.id === "clients") expect(byKey.program).toBe("DELETE THIS EXAMPLE ROW");
+        if (tpl.id === "services") { expect(byKey.legacyId).toBe("DELETE THIS EXAMPLE ROW"); expect(byKey.name).toBe(""); }
         if (tpl.id === "pantry") expect(byKey.agency).toBe("DELETE THIS EXAMPLE ROW");
         if (tpl.id === "seminars") expect(byKey.seminar).toBe("DELETE THIS EXAMPLE ROW");
         if (tpl.id === "volunteers") expect(byKey.program).toBe("DELETE THIS EXAMPLE ROW");
