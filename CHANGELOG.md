@@ -6,6 +6,31 @@ tracks a federal instrument or guideline revision) are marked **[compliance]**
 
 ## Unreleased — 0.5.0 (roadmap Phases 1–5)
 
+### Service-history import (new template)
+- New "Service history" spreadsheet template backfills the service log from a
+  legacy system — one row per service delivered. Clients resolve by **legacy
+  ID** (the client_external_ids linkage written at migration), a Trellis ID,
+  or an exact unambiguous name (+DOB); the service must be an AR 3.0 code or
+  exact label; the program comes from a column, a fixed value, or the
+  client's only enrollment — ambiguity always skips with a reason, never a
+  guess. Re-imports are idempotent: a row matching an existing log entry
+  (same client, service, date, and note) skips. Fixed one-value-for-the-file
+  inputs work here too (service, program, legacy system).
+
+### Client migration: record-complete imports
+- The client-migration template now covers the full client record, not just
+  the report characteristics: **County** of residence, **Caseworker**
+  assignment (resolves by staff name, username, or initials; blank assigns to
+  the importer), and a **Legacy client ID + Legacy system** pair. The legacy
+  pair writes a durable `client_external_ids` cross-reference — and makes
+  re-imports idempotent: a row whose (system, ID) is already linked skips with
+  a clear reason instead of re-importing under a new name-match. County,
+  caseworker, and legacy system all support the set-one-value-for-every-row
+  shortcut; ClientTrack's own `ClientID` header auto-maps onto the legacy pair.
+- Rows held for duplicate review carry the new fields through resolution:
+  "create new client" honors the sheet's caseworker, and both resolutions
+  link the legacy ID.
+
 ### Duplicate matching becomes real (integration groundwork)
 - **One shared matching engine** (`src/lib/matching.ts`): exact identity =
   normalized name + date of birth; "possible" = same last name plus a matching

@@ -5,7 +5,7 @@ import { IMPORT_TEMPLATES, autoMapColumns, templateCsv } from "../src/lib/import
 describe("downloadable import templates", () => {
   it("covers every template in the picker", () => {
     expect(IMPORT_TEMPLATES.map((t) => t.id).sort()).toEqual(
-      ["clients", "pantry", "pantry-agencies", "seminars", "volunteers"].sort());
+      ["clients", "pantry", "pantry-agencies", "seminars", "volunteers", "services"].sort());
   });
 
   it("client migration carries every All Characteristics Report field (C1-C8, D9-D13)", () => {
@@ -21,6 +21,19 @@ describe("downloadable import templates", () => {
     for (const [code, key] of Object.entries(feeds)) {
       expect(keys.has(key), `${code} needs the “${key}” import column`).toBe(true);
     }
+  });
+
+  it("client migration carries the full client record beyond the report fields", () => {
+    const clients = IMPORT_TEMPLATES.find((t) => t.id === "clients")!;
+    const keys = new Set(clients.fields.map((f) => f.key));
+    // record-completeness columns: residence county, caseworker assignment,
+    // and the legacy-system ID pair that feeds client_external_ids linkage
+    for (const key of ["county", "caseworker", "legacyId", "legacySystem"]) {
+      expect(keys.has(key), `client migration needs the “${key}” column`).toBe(true);
+    }
+    // ClientTrack's own export headers must auto-map onto the legacy pair
+    const legacy = clients.fields.find((f) => f.key === "legacyId")!;
+    expect(legacy.aliases).toContain("clientid");
   });
 
   for (const tpl of IMPORT_TEMPLATES) {
@@ -42,6 +55,7 @@ describe("downloadable import templates", () => {
         // each template's match-or-create guard: the cell the importer keys on
         // either never matches existing data or is blank (both skip with a reason)
         if (tpl.id === "clients") expect(byKey.program).toBe("DELETE THIS EXAMPLE ROW");
+        if (tpl.id === "services") { expect(byKey.legacyId).toBe("DELETE THIS EXAMPLE ROW"); expect(byKey.name).toBe(""); }
         if (tpl.id === "pantry") expect(byKey.agency).toBe("DELETE THIS EXAMPLE ROW");
         if (tpl.id === "seminars") expect(byKey.seminar).toBe("DELETE THIS EXAMPLE ROW");
         if (tpl.id === "volunteers") expect(byKey.program).toBe("DELETE THIS EXAMPLE ROW");

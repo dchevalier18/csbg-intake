@@ -363,7 +363,7 @@ function ImportWizard({ onClose, toast, programs, fplYears, services }: {
   const tpl: ImportTemplate | undefined = importTemplate(templateId);
   // Fixed-value assignment (a field with no column takes one value for the whole
   // file) is only offered on the client-migration template, per product scope.
-  const allowFixed = tpl?.id === "clients";
+  const allowFixed = tpl?.id === "clients" || tpl?.id === "services";
 
   function pickFile(file: File | undefined) {
     if (!file || !tpl) return;

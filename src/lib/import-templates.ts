@@ -23,7 +23,7 @@ export interface ImportField {
 }
 
 export interface ImportTemplate {
-  id: "pantry" | "pantry-agencies" | "seminars" | "volunteers" | "clients";
+  id: "pantry" | "pantry-agencies" | "seminars" | "volunteers" | "clients" | "services";
   name: string;
   blurb: string;         // template-picker card copy
   target: string;        // where the rows land, for the result message
@@ -63,8 +63,15 @@ export const IMPORT_TEMPLATES: ImportTemplate[] = [
         aliases: ["phone", "phone number", "telephone", "cell", "mobile"], example: "(610) 555-0100" },
       { key: "address", label: "Address", required: false, hint: "",
         aliases: ["address", "street", "street address", "address 1"], example: "123 Main St, Allentown, PA 18102" },
+      { key: "county", label: "County", required: false, hint: "County of residence",
+        aliases: ["county", "county name", "county of residence", "residence county"],
+        example: "Lehigh", fixed: "text" },
       { key: "enrolled", label: "Enrollment date", required: false, hint: "Defaults to today",
         aliases: ["enrolled", "enrollment date", "enroll date", "intake date", "start date"], example: "2026-01-15" },
+      { key: "caseworker", label: "Caseworker", required: false,
+        hint: "Staff name, username, or initials — blank assigns the records to you",
+        aliases: ["caseworker", "case worker", "case manager", "assigned staff", "assigned to", "worker", "counselor"],
+        example: "", fixed: "text" },
       { key: "sex", label: "Sex (C1)", required: false, hint: "Instrument answer or close variant",
         aliases: ["sex", "gender"], example: "Female" },
       { key: "race", label: "Race/ethnicity (C6)", required: false, hint: "Instrument answer or close variant",
@@ -105,6 +112,47 @@ export const IMPORT_TEMPLATES: ImportTemplate[] = [
       { key: "serviceDate", label: "Service date", required: false, hint: "Defaults to the enrollment date",
         aliases: ["service date", "date of service", "dos", "served", "served on"],
         example: "2026-01-15" },
+      { key: "legacyId", label: "Legacy client ID", required: false,
+        hint: "The record's ID in the system you're migrating from — kept as a durable cross-reference, and re-imports of the same ID are skipped",
+        aliases: ["legacy id", "client id", "clientid", "old id", "record id", "case id", "case number", "case #", "client number", "client #", "external id"],
+        example: "20636" },
+      { key: "legacySystem", label: "Legacy system", required: false,
+        hint: "Name of the source system (ClientTrack, CAP60…) — usually one value for the whole file",
+        aliases: ["legacy system", "source system", "system", "source", "system of origin"],
+        example: "ClientTrack", fixed: "text" },
+    ],
+  },
+  {
+    id: "services",
+    name: "Service history",
+    blurb: "Backfill the service log from a legacy system — one row per service delivered, matched to clients by legacy ID.",
+    target: "the service log",
+    fields: [
+      { key: "legacyId", label: "Legacy client ID", required: false,
+        hint: "The client's ID in the source system (linked at client migration) — or a Trellis ID like C-2417",
+        aliases: ["legacy id", "client id", "clientid", "client number", "client #", "record id", "case id", "case number"],
+        example: SENTINEL },
+      { key: "name", label: "Client name", required: false,
+        hint: "Fallback match when there's no ID — exact full name, unique among clients (map a DOB column to disambiguate)",
+        aliases: ["name", "client name", "full name", "client"], example: "" },
+      { key: "dob", label: "Date of birth", required: false, hint: "Disambiguates name matches",
+        aliases: ["dob", "date of birth", "birthdate", "birth date"], example: "" },
+      { key: "service", label: "Service provided", required: true,
+        hint: "AR 3.0 code (SRV 4e) or exact label", fixed: "service",
+        aliases: ["service", "service code", "srv", "service provided", "service received", "ar code"],
+        example: "SDA 1b" },
+      { key: "date", label: "Service date", required: true, hint: "2026-01-15 or 1/15/2026",
+        aliases: ["date", "service date", "date of service", "dos", "begin date", "served on"],
+        example: "2026-01-15" },
+      { key: "program", label: "Program", required: false, fixed: "program",
+        hint: "Name or id — blank uses the client's only enrolled program",
+        aliases: ["program", "program id", "program name", "organization"], example: "" },
+      { key: "note", label: "Note", required: false,
+        hint: "Kept on the log entry — and re-imports skip rows that match an existing entry exactly",
+        aliases: ["note", "notes", "memo", "detail", "description"], example: "ClientTrack service #54017" },
+      { key: "legacySystem", label: "Legacy system", required: false, fixed: "text",
+        hint: "Which system the legacy client IDs come from — blank matches any linked ID",
+        aliases: ["legacy system", "source system", "system", "source"], example: "ClientTrack" },
     ],
   },
   {

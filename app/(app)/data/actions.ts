@@ -185,6 +185,18 @@ export async function commitImport(
       serviceByRef.set(s.code.toLowerCase(), s.code);
       serviceByRef.set(s.label.toLowerCase(), s.code);
     }
+    // caseworker column resolves by staff name, username, or initials
+    const staffByRef = new Map<string, string>();
+    for (const u of await db.select().from(t.users).where(eq(t.users.active, 1))) {
+      staffByRef.set(u.name.toLowerCase(), u.id);
+      staffByRef.set(u.username.toLowerCase(), u.id);
+      staffByRef.set(u.initials.toLowerCase(), u.id);
+      staffByRef.set(u.id.toLowerCase(), u.id);
+    }
+    // legacy-ID linkage: a (system, id) pair already on file means the row
+    // was imported before — idempotent re-imports skip it by ID, not by name
+    const extPairs = new Set(
+      (await db.select().from(t.clientExternalIds)).map((r) => `${r.system}|${r.externalId.toLowerCase()}`));
     const now = new Date().toISOString();
     const today = todayIso();
     // characteristics canonicalize where possible; unmappable values import
@@ -266,6 +278,24 @@ export async function commitImport(
       const serviceDateRaw = cell(row, "serviceDate");
       const serviceDate = serviceDateRaw ? parseDateIso(serviceDateRaw) : enrolled;
       if (!serviceDate) { skip(rowNo, `service date “${serviceDateRaw}” — use a format like 2026-01-15`); continue; }
+      // Caseworker assignment: resolves by name/username/initials; blank = importer
+      const caseworkerRaw = cell(row, "caseworker");
+      let caseworkerId = user.id;
+      if (caseworkerRaw) {
+        const match = staffByRef.get(caseworkerRaw.toLowerCase());
+        if (!match) { skip(rowNo, `no staff member matches “${caseworkerRaw}” — use their name, username, or initials`); continue; }
+        caseworkerId = match;
+      }
+      // Legacy-ID linkage: keeps the source system's record ID as a durable
+      // cross-reference and makes re-imports of the same export idempotent
+      const legacyIdRaw = cell(row, "legacyId");
+      const legacySystem = (cell(row, "legacySystem") || "legacy").trim().toLowerCase();
+      const legacyPair = legacyIdRaw ? `${legacySystem}|${legacyIdRaw.toLowerCase()}` : null;
+      if (legacyPair && extPairs.has(legacyPair)) {
+        skip(rowNo, `legacy ID “${legacyIdRaw}” (${legacySystem}) is already linked to a client record`);
+        continue;
+      }
+      const externalId = legacyIdRaw ? { system: legacySystem, id: legacyIdRaw } : undefined;
       // Remaining All Characteristics Report fields (C3/C5/C7/C8/D13 + the C4
       // custom field) — the same canonicalize-or-keep treatment the C1/C6/D9/D11
       // columns get, so imported records can be report-complete on day one.
@@ -306,12 +336,14 @@ export async function commitImport(
               first, last, dob,
               phone: cell(row, "phone") || null,
               address: cell(row, "address") || null,
+              county: cell(row, "county") || null,
               sex: canonOr("C1", cell(row, "sex")),
               race: canonOr("C6", cell(row, "race")),
               housing: canonOr("D11", cell(row, "housing")),
               hhType: canonOr("D9", cell(row, "hhType")),
               hhSize,
               edu, work, insurance, military, disability, incomeSrc,
+              caseworkerId,
               custom,
               income: annualIncome,
               incomeWorksheet: worksheet,
@@ -321,9 +353,11 @@ export async function commitImport(
             programId,
             serviceCode: serviceCode || undefined,
             serviceDate: serviceCode ? serviceDate : undefined,
+            externalId,
           },
           candidateIds: possible.map((m) => m.client.id),
         });
+        if (legacyPair) extPairs.add(legacyPair);
         continue;
       }
 
@@ -335,6 +369,7 @@ export async function commitImport(
         dob,
         phone: cell(row, "phone") || null,
         address: cell(row, "address") || null,
+        county: cell(row, "county") || null,
         sex: canonOr("C1", cell(row, "sex")),
         race: canonOr("C6", cell(row, "race")),
         housing: canonOr("D11", cell(row, "housing")),
@@ -343,7 +378,7 @@ export async function commitImport(
         edu, work, insurance, military, disability, incomeSrc,
         income: annualIncome,
         incomeWorksheet: worksheet,
-        caseworkerId: user.id,
+        caseworkerId,
         enrolled,
         fplYear,
         nextFollowUp: null,
@@ -363,10 +398,119 @@ export async function commitImport(
           note: "Imported with client record",
         });
       }
+      if (externalId) {
+        await db.insert(t.clientExternalIds)
+          .values({ system: externalId.system, externalId: externalId.id, clientId, linkedAt: now, linkedBy: user.id })
+          .onConflictDoNothing();
+        extPairs.add(legacyPair!);
+      }
       seen.add(key);
       createdClientIds.push(clientId);
       imported++;
     }
+  } else if (tpl.id === "services") {
+    // ---- service-history backfill (legacy-system export) ----
+    // Clients resolve by legacy ID (client_external_ids linkage from the
+    // migration), a Trellis ID, or an exact unambiguous name (+DOB).
+    const bySystemId = new Map<string, string>();
+    const byIdAlone = new Map<string, string | null>(); // null = ambiguous across systems
+    for (const r of await db.select().from(t.clientExternalIds)) {
+      const idLower = r.externalId.toLowerCase();
+      bySystemId.set(`${r.system}|${idLower}`, r.clientId);
+      byIdAlone.set(idLower, byIdAlone.has(idLower) && byIdAlone.get(idLower) !== r.clientId ? null : r.clientId);
+    }
+    const allClients = await db.select({
+      id: t.clients.id, first: t.clients.first, last: t.clients.last, dob: t.clients.dob,
+    }).from(t.clients);
+    const byTrellisId = new Map(allClients.map((c) => [c.id.toLowerCase(), c.id]));
+    const byName = new Map<string, Array<{ id: string; dob: string }>>();
+    for (const c of allClients) {
+      const k = `${c.first} ${c.last}`.trim().toLowerCase();
+      byName.set(k, [...(byName.get(k) ?? []), { id: c.id, dob: c.dob }]);
+    }
+    const programs = await getPrograms();
+    const programByRef = new Map<string, string>();
+    for (const p of programs) {
+      programByRef.set(p.id.toLowerCase(), p.id);
+      programByRef.set(p.short.toLowerCase(), p.id);
+      programByRef.set(p.name.toLowerCase(), p.id);
+    }
+    const enrolledPrograms = new Map<string, string[]>();
+    for (const cp of await db.select().from(t.clientPrograms)) {
+      enrolledPrograms.set(cp.clientId, [...(enrolledPrograms.get(cp.clientId) ?? []), cp.programId]);
+    }
+    const serviceByRef = new Map<string, string>();
+    for (const svc of await db.select().from(t.services)) {
+      serviceByRef.set(svc.code.toLowerCase(), svc.code);
+      serviceByRef.set(svc.label.toLowerCase(), svc.code);
+    }
+    // idempotency: an entry identical in (client, code, date, note) is the
+    // same historical fact — re-importing the export must not double-log it
+    const logSeen = new Set(
+      (await db.select({
+        clientId: t.serviceLog.clientId, code: t.serviceLog.code,
+        date: t.serviceLog.date, note: t.serviceLog.note,
+      }).from(t.serviceLog)).map((r) => `${r.clientId}|${r.code}|${r.date}|${r.note}`));
+
+    for (const [i, row] of rows.entries()) {
+      const rowNo = i + 2;
+      const serviceRef = cell(row, "service");
+      const code = serviceRef ? serviceByRef.get(serviceRef.toLowerCase()) : undefined;
+      if (!code) { skip(rowNo, serviceRef ? `no service matches “${serviceRef}” — use an AR 3.0 code or exact label` : "missing service"); continue; }
+      const date = parseDateIso(cell(row, "date"));
+      if (!date) { skip(rowNo, `service date “${cell(row, "date")}” — use a format like 2026-01-15`); continue; }
+
+      // resolve the client
+      const ref = cell(row, "legacyId");
+      let clientId: string | undefined;
+      if (ref) {
+        const refLower = ref.toLowerCase();
+        clientId = byTrellisId.get(refLower);
+        if (!clientId) {
+          const system = cell(row, "legacySystem").trim().toLowerCase();
+          if (system) {
+            clientId = bySystemId.get(`${system}|${refLower}`);
+          } else {
+            const only = byIdAlone.get(refLower);
+            if (only === null) { skip(rowNo, `legacy ID “${ref}” is linked in more than one system — set the Legacy system`); continue; }
+            clientId = only ?? undefined;
+          }
+        }
+        if (!clientId) { skip(rowNo, `no client is linked to legacy ID “${ref}” — run the client migration first`); continue; }
+      } else {
+        const nm = cell(row, "name");
+        if (!nm) { skip(rowNo, "missing client reference — map a legacy ID or name column"); continue; }
+        const dobRaw = cell(row, "dob");
+        const dobIso = dobRaw ? parseDateIso(dobRaw) : null;
+        if (dobRaw && !dobIso) { skip(rowNo, `date of birth “${dobRaw}” — use a format like 2001-05-14`); continue; }
+        const candidates = byName.get(nm.trim().toLowerCase()) ?? [];
+        const matched = dobIso ? candidates.filter((c) => c.dob === dobIso) : candidates;
+        if (matched.length === 0) { skip(rowNo, `no client matches “${nm}”${dobIso ? ` born ${dobIso}` : ""}`); continue; }
+        if (matched.length > 1) { skip(rowNo, `“${nm}” matches ${matched.length} clients — map a DOB or legacy-ID column`); continue; }
+        clientId = matched[0].id;
+      }
+
+      // resolve the program: explicit column/fixed value, else the client's
+      // only enrollment — ambiguity is a skip, never a guess
+      const progRef = cell(row, "program");
+      let programId: string | undefined;
+      if (progRef) {
+        programId = programByRef.get(progRef.toLowerCase());
+        if (!programId) { skip(rowNo, `no program matches “${progRef}”`); continue; }
+      } else {
+        const enrolled = enrolledPrograms.get(clientId) ?? [];
+        if (enrolled.length === 1) programId = enrolled[0];
+        else { skip(rowNo, `${clientId} is enrolled in ${enrolled.length} programs — map a program column or set one for the file`); continue; }
+      }
+
+      const note = cell(row, "note");
+      const dupKey = `${clientId}|${code}|${date}|${note}`;
+      if (logSeen.has(dupKey)) { skip(rowNo, `already in the service log (same client, service, date, and note)`); continue; }
+      await db.insert(t.serviceLog).values({ date, clientId, code, programId, staffId: user.id, note });
+      logSeen.add(dupKey);
+      imported++;
+    }
+    revalidatePath("/services");
   } else if (tpl.id === "pantry-agencies") {
     // ---- member-agency roster (Primarius 2.0 agency export or any list) ----
     const programs = await getPrograms();
@@ -686,7 +830,7 @@ export async function resolveMatchReview(id: number, action: ReviewAction): Prom
     await db.insert(t.clients).values({
       id: clientId,
       ...p.client,
-      caseworkerId: user.id,
+      caseworkerId: p.client.caseworkerId ?? user.id,
       nextFollowUp: null,
       flags: ["Migrated record — verify characteristics"],
       custom: p.client.custom ?? {},
