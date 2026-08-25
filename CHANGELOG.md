@@ -6,6 +6,37 @@ tracks a federal instrument or guideline revision) are marked **[compliance]**
 
 ## Unreleased — 0.5.0 (roadmap Phases 1–5)
 
+### PA HMIS: a date range for the stored procedure, set in the UI
+- **Settings → Integrations** gains a **Date range** section. Until now the sync
+  sent nothing but the parameters JSON, so the period was whatever the
+  procedure's own SQL decided — invisible from here. The window is now
+  configurable: fiscal year to date (following the agency's FY start month, so it
+  matches what Reports calls the current FY), calendar year to date, a rolling
+  *N*-day window, or fixed dates for a one-off backfill.
+- **Resolved on every sync, not stored as literal dates.** A window typed into
+  the parameters JSON freezes at whatever was saved; a scheduled sync would keep
+  pulling the same stale period forever. Rolling and year-to-date modes are
+  recalculated per request, and the form previews the exact window the next sync
+  will send.
+- The procedure's **parameter names are configuration**, not constants — the
+  names belong to whoever wrote the procedure, and ours has never returned a row.
+  Both names are required: a half window is worse than none, because the
+  procedure would silently default the other end. A date left in the parameters
+  JSON under the same name is **shadowed by the window and reported**, so a stale
+  hand-typed date can't quietly win over a rolling one.
+- The window appears in the sync result, the audit log, and **Test connection**,
+  which now posts the same body a real sync would. Dates aren't identifying data,
+  so unlike parameter values these are shown in full — and an empty result is
+  exactly where knowing the period matters. A range set while the CRQL query is
+  the client source is flagged as inert: that query has no `WHERE` clause.
+- Ops-managed installs get `HMIS_DATE_PARAMS` and `HMIS_DATE_RANGE`
+  (`fy`, `cy`, `rolling:90`, or `2026-01-01..2026-06-30`).
+- The window logic lives in **`src/lib/hmis-dates.ts`**, separate from
+  `src/lib/hmis.ts`, because the settings form needs it and that module imports
+  the database layer — importing it from a client component pulls node-postgres
+  into the browser bundle. One definition of every window, shared by the form and
+  the sync.
+
 ### PA HMIS stored procedure: envelope, prefix and column corrections
 - **Fixes a silent zero-row sync.** The stored-procedure endpoint returns
   `{"output": [], "result": {"table1": […]}}` — `result` not `data`, lowercase

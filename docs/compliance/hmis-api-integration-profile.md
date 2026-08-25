@@ -283,7 +283,8 @@ procedure name and its parameter *keys* (never values) are logged alongside any
 ## Configuration
 
 Primary: **Settings → Integrations** (admin-only) — base URL, subscription key,
-API key, Org ID, page size. Saved to the database and applied immediately, no
+API key, Org ID, page size, stored procedure and its parameters, and the
+optional **date range** (below). Saved to the database and applied immediately, no
 restart; suits hosted tiers (Apache/Ubuntu, Docker) where staff have no shell
 access. Both keys are write-only in the UI (never sent back to the browser,
 never audited) and **encrypted at rest** with AES-256-GCM (`src/lib/secrets.ts`).
@@ -306,6 +307,8 @@ HMIS_ORG_ID=            # optional, User Keys only
 HMIS_PAGE_SIZE=         # optional, default 200, max 500 (CRQL only)
 HMIS_STORED_PROCEDURE=  # optional; set = the client source, blank = CRQL query
 HMIS_STORED_PROCEDURE_PARAMS=  # optional JSON object, default {}
+HMIS_DATE_PARAMS=       # optional "StartDate,EndDate" — both required or neither applies
+HMIS_DATE_RANGE=        # optional fy | cy | rolling:<days> | <start>..<end>
 ```
 
 Credentials rest inside the app database (encrypted) or the server's
@@ -359,6 +362,49 @@ pull + integration pass). Admin-only.
    required rather than optional.
 7. **Rate limits for the initial backfill**, and whether the list should filter
    on `ActiveStatus` rather than merely select it.
+8. **What the procedure's date parameters are called, and whether it has an
+   internal window of its own.** CAP Trellis can now send a reporting window as
+   two of the procedure's parameters (see *Date range* below), but the names are
+   the procedure author's to give — and if the SQL already filters internally,
+   that filter still applies underneath whatever we send. This matters more than
+   it looks: the snapshot is **full-replace**, so a procedure with a narrow
+   internal window would make `hmis_clients` shrink to that window on every sync,
+   and the organization-wide unduplicated total on `/reports` would quietly count
+   only that period. Worth settling with the HMIS engineer before the first
+   production sync.
+
+## Date range
+
+Optional, configured in **Settings → Integrations**, and applied to the stored
+procedure only — the CRQL query carries no `WHERE` clause, so a window set while
+CRQL is the client source is inert and the settings form says so.
+
+| Mode | Window |
+|---|---|
+| No date parameters | nothing sent; the procedure's own filtering decides |
+| Fiscal year to date | the agency's FY start (Settings → Organization) → today |
+| Calendar year to date | January 1 → today |
+| Rolling window | today − *N* days → today |
+| Fixed dates | an explicit start and end, for a one-off backfill |
+
+Two properties are deliberate. **The window is resolved per request, never
+stored as literal dates** — a date typed into the parameters JSON freezes on the
+day it was saved, so a recurring sync would keep asking for a stale period.
+**Both parameter names are required**: with only one, the procedure would apply
+its own default to the other end, and a half-specified window is harder to
+notice than no window at all. A date already present in the parameters JSON
+under one of those names is shadowed by the resolved window and reported in the
+sync result, so a leftover literal cannot quietly override a rolling range.
+
+The fiscal-year mode reads the same FY start month as the Reports rollup rather
+than assuming the federal October, so "fiscal year to date" means one thing
+across the app.
+
+Implementation: `src/lib/hmis-dates.ts` (pure, and importable from client
+components — `src/lib/hmis.ts` imports the database layer and is not), resolved
+into the request body by `resolveProcedureParams`. The window is reported in the
+sync result, the audit row, and Test connection, which posts the same body a
+real sync would; dates are not identifying data, so they are shown in full.
 
 ## Disposition of electronic files (MOU condition)
 

@@ -11,8 +11,10 @@ import { audit } from "@/lib/access";
 import { kvGet, kvSet } from "@/lib/data/core";
 import { encryptSecret } from "@/lib/secrets";
 import {
-  CTAPI_BASE_URL, CTAPI_MAX_PAGE_SIZE, effectivePageSize, normalizeProcedureName,
-  parseProcedureParams, type HmisStoredConfig,
+  CTAPI_BASE_URL, CTAPI_MAX_PAGE_SIZE, DATE_RANGE_LABELS, MAX_ROLLING_DAYS,
+  describeDateWindow, effectivePageSize, isIsoDate, normalizeDateRange,
+  normalizeProcedureName, parseProcedureParams, resolveHmisDateWindow,
+  type HmisDateRange, type HmisStoredConfig,
 } from "@/lib/hmis";
 
 export interface SettingsResult { ok: boolean; message: string }
@@ -25,6 +27,53 @@ export interface HmisSettingsInput {
   pageSize: string;
   storedProcedure: string;        // blank = sync from the CRQL query instead
   storedProcedureParams: string;  // JSON object; blank = {}
+  /** Date window handed to the procedure as two of its own parameters. */
+  dateRangeMode: string;
+  dateStartKey: string;
+  dateEndKey: string;
+  dateStart: string;              // ISO, mode "fixed"
+  dateEnd: string;                // ISO, mode "fixed"
+  dateDays: string;               // mode "rollingDays"
+}
+
+/** Validate the window as a unit: a mode that needs names without them, or a
+    fixed range with a missing or backwards date, would save cleanly and then
+    quietly send no dates at all — the failure mode this rejects. */
+function validateDateRange(input: HmisSettingsInput): { ok: true; value: HmisDateRange } | { ok: false; message: string } {
+  const range = normalizeDateRange({
+    mode: input.dateRangeMode,
+    startKey: input.dateStartKey,
+    endKey: input.dateEndKey,
+    start: input.dateStart,
+    end: input.dateEnd,
+    days: input.dateDays,
+  });
+  if (range.mode === "none") {
+    // keep the names on record so switching a mode back on doesn't retype them
+    return { ok: true, value: range };
+  }
+  if (!range.startKey || !range.endKey) {
+    return {
+      ok: false,
+      message: "Enter both the start and end parameter names — the procedure needs a name to receive each date under."
+        + " Ask whoever wrote the procedure what they are.",
+    };
+  }
+  if (range.startKey === range.endKey) {
+    return { ok: false, message: "The start and end parameter names must differ, or only one date reaches the procedure." };
+  }
+  if (range.mode === "fixed") {
+    if (!isIsoDate(range.start) || !isIsoDate(range.end)) {
+      return { ok: false, message: "Enter both a start and an end date for a fixed range." };
+    }
+    if (range.start > range.end) {
+      return { ok: false, message: "The start date must fall on or before the end date." };
+    }
+  }
+  if (range.mode === "rollingDays" && !(range.days > 0)) {
+    return { ok: false, message: `Enter how many days back to look — 1 to ${MAX_ROLLING_DAYS}.` };
+  }
+  return { ok: true, value: range };
 }
 
 /** CTAPI rejects plain HTTP, so http:// is a validation error rather than a
@@ -63,6 +112,8 @@ export async function saveHmisSettings(input: HmisSettingsInput): Promise<Settin
   if (!procedure.ok) return { ok: false, message: procedure.message };
   const params = parseProcedureParams(input.storedProcedureParams);
   if (!params.ok) return { ok: false, message: params.message };
+  const range = validateDateRange(input);
+  if (!range.ok) return { ok: false, message: range.message };
 
   const stored: HmisStoredConfig = {
     baseUrl,
@@ -72,15 +123,26 @@ export async function saveHmisSettings(input: HmisSettingsInput): Promise<Settin
     pageSize,
     storedProcedure: procedure.value,
     storedProcedureParams: params.value,
+    dateRange: range.value,
   };
   await kvSet("hmisConn", stored);
+  // only needed to preview a fiscal-year window in the confirmation and audit
+  // line; the sync itself reads this again at request time
+  const org = (await db.select({ fyStart: t.organization.fyStart })
+    .from(t.organization).where(eq(t.organization.id, 1)))[0];
   // endpoints, scope and source only — neither key, nor any part of one, is
   // ever audited; parameter KEYS only, since a value could carry identifiers
   const paramKeys = Object.keys(params.value);
+  // dates are not identifying data, so unlike parameter values the window is
+  // safe to audit — and worth auditing, since it decides what a sync pulled
+  const windowNote = range.value.mode === "none"
+    ? "no date parameters"
+    : describeDateWindow(range.value, resolveHmisDateWindow(range.value, new Date(), org?.fyStart));
   await audit(user.id, "hmis.settings.save", "integration", "hmis",
     `Connection saved — ${baseUrl}${stored.orgId ? `, OrgId ${stored.orgId}` : ""}, page size ${pageSize}`
     + `, client source ${procedure.value ? `stored procedure ${procedure.value}` : "CRQL query on cmClient"}`
     + (procedure.value && paramKeys.length ? ` (parameters: ${paramKeys.join(", ")})` : "")
+    + `, date range ${windowNote}`
     + ` (subscription key ${subscriptionKeyInput ? "replaced" : "unchanged"}, API key ${apiKeyInput ? "replaced" : "unchanged"})`);
   revalidatePath("/settings/integrations");
   revalidatePath("/data");
@@ -91,6 +153,14 @@ export async function saveHmisSettings(input: HmisSettingsInput): Promise<Settin
   notes.push(procedure.value
     ? `clients will sync from ${procedure.value}`
     : "clients will sync from the CRQL query");
+  if (range.value.mode !== "none") {
+    notes.push(windowNote);
+    // saved, but inert: the CRQL query has no WHERE clause to put dates in, so
+    // say so now rather than let someone wonder why the window did nothing
+    if (!procedure.value) {
+      notes.push("the date range applies to a stored procedure only and will be ignored while the CRQL query is the source");
+    }
+  }
   return { ok: true, message: `HMIS connection saved — ${notes.join("; ")}. Use Test connection to verify it.` };
 }
 
