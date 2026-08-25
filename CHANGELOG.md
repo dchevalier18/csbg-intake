@@ -6,36 +6,44 @@ tracks a federal instrument or guideline revision) are marked **[compliance]**
 
 ## Unreleased — 0.5.0 (roadmap Phases 1–5)
 
-### PA HMIS: a date range for the stored procedure, set in the UI
-- **Settings → Integrations** gains a **Date range** section. Until now the sync
-  sent nothing but the parameters JSON, so the period was whatever the
-  procedure's own SQL decided — invisible from here. The window is now
-  configurable: fiscal year to date (following the agency's FY start month, so it
-  matches what Reports calls the current FY), calendar year to date, a rolling
-  *N*-day window, or fixed dates for a one-off backfill.
-- **Resolved on every sync, not stored as literal dates.** A window typed into
-  the parameters JSON freezes at whatever was saved; a scheduled sync would keep
-  pulling the same stale period forever. Rolling and year-to-date modes are
-  recalculated per request, and the form previews the exact window the next sync
-  will send.
-- The procedure's **parameter names are configuration**, not constants — the
-  names belong to whoever wrote the procedure, and ours has never returned a row.
-  Both names are required: a half window is worse than none, because the
-  procedure would silently default the other end. A date left in the parameters
-  JSON under the same name is **shadowed by the window and reported**, so a stale
-  hand-typed date can't quietly win over a rolling one.
-- The window appears in the sync result, the audit log, and **Test connection**,
-  which now posts the same body a real sync would. Dates aren't identifying data,
-  so unlike parameter values these are shown in full — and an empty result is
-  exactly where knowing the period matters. A range set while the CRQL query is
-  the client source is flagged as inert: that query has no `WHERE` clause.
-- Ops-managed installs get `HMIS_DATE_PARAMS` and `HMIS_DATE_RANGE`
-  (`fy`, `cy`, `rolling:90`, or `2026-01-01..2026-06-30`).
-- The window logic lives in **`src/lib/hmis-dates.ts`**, separate from
-  `src/lib/hmis.ts`, because the settings form needs it and that module imports
-  the database layer — importing it from a client component pulls node-postgres
-  into the browser bundle. One definition of every window, shared by the form and
-  the sync.
+### PA HMIS: sync one period at a time, and never the same one twice
+- **[compliance]** The sync now asks for a **reporting period** and records it.
+  Until now it sent nothing but the parameters JSON, so the period was whatever
+  the procedure's SQL decided — invisible from the app. The procedure's
+  parameters are `StartDate`/`EndDate` (confirmed with the PA HMIS engineer);
+  the names stay configurable in **Settings → Integrations** because they belong
+  to whoever wrote the procedure, but the **window is chosen per run** on
+  **Data & integrations**, with quick picks for last full month, fiscal year to
+  date, and calendar year to date. Fiscal year follows the agency's FY start
+  month, so it means the same thing here as on Reports.
+- **A period already synced is refused.** Each completed sync stores the window
+  it covered on its import-job row (`import_jobs.hmis_start` / `hmis_end`), and
+  the next sync subtracts every stored period from what you ask for. An exact or
+  fully-covered repeat is refused and names the periods that already cover it; a
+  request that only partly overlaps is **narrowed to the remaining gap** and
+  says so. A request straddling two covered periods (more than one gap) is
+  refused rather than silently fanning one click out into several production
+  calls. A checkbox re-syncs a period deliberately, for data corrected on the
+  HMIS side. Because the record lives on the job row, **undoing a sync frees its
+  period** — after an undo that period genuinely is not covered.
+- **The `hmis_clients` snapshot now merges instead of replacing.** Full replace
+  was right while every sync pulled everything, but with per-period syncing it
+  would drop every earlier period's rows — leaving the organization-wide
+  unduplicated total on `/reports` reflecting only the most recent window. Rows
+  upsert on `hmis_id` (the primary key and the durable HMIS link key), so prior
+  periods survive and anyone seen again is refreshed rather than duplicated.
+- The period appears in the sync result, the job detail, the audit row, and
+  **Test connection**, which posts the same body a real sync would. Dates are
+  not identifying data, so unlike parameter values they are shown in full — and
+  an empty result is exactly where knowing the period matters. A period set
+  while the CRQL query is the client source is flagged as inert: that query has
+  no `WHERE` clause.
+- Interval arithmetic and the window presets live in **`src/lib/hmis-dates.ts`**,
+  separate from `src/lib/hmis.ts`, because the sync panel and settings form need
+  them and that module imports the database layer — importing it from a client
+  component pulls node-postgres into the browser bundle. One definition of every
+  window, shared by the UI and the sync.
+- Ops-managed installs set the parameter names with `HMIS_DATE_PARAMS`.
 
 ### PA HMIS stored procedure: envelope, prefix and column corrections
 - **Fixes a silent zero-row sync.** The stored-procedure endpoint returns

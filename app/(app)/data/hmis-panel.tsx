@@ -9,7 +9,18 @@ import { Chip, Empty, Panel } from "@/components/ui";
 import { I } from "@/components/icons";
 import { useToast } from "@/components/toast";
 import { fmt } from "@/lib/format";
-import { resolveHmisReview, runHmisSync, setHmisProgram, testHmisConnection } from "./hmis-actions";
+// @/lib/hmis-dates, NOT @/lib/hmis: that module imports the database layer
+import { describeWindow, presetWindow, type HmisWindowPreset } from "@/lib/hmis-dates";
+import {
+  resolveHmisReview, runHmisSync, setHmisProgram, testHmisConnection,
+  type HmisSyncPeriod,
+} from "./hmis-actions";
+
+const PRESETS: Array<{ id: HmisWindowPreset; label: string }> = [
+  { id: "lastFullMonth", label: "Last full month" },
+  { id: "fiscalYearToDate", label: "Fiscal year to date" },
+  { id: "calendarYearToDate", label: "Calendar year to date" },
+];
 
 export interface HmisSyncStats {
   at: string | null;        // ISO datetime of last sync (null = never)
@@ -30,17 +41,33 @@ export interface HmisReviewItem {
   candidates: Array<{ id: string; name: string; dob: string; phone: string }>;
 }
 
-export function HmisPanel({ configured, stats, reviews, programs, programId }: {
+export function HmisPanel({ configured, stats, reviews, programs, programId, coverage, fyStart, rangeApplies }: {
   configured: boolean;
   stats: HmisSyncStats;
   reviews: HmisReviewItem[];
   programs: Array<{ id: string; name: string }>;
   programId: string | null;
+  /** Periods already pulled — what makes a repeat sync detectable. */
+  coverage: HmisSyncPeriod[];
+  /** The agency's FY start month, so the preset means the same thing here as on
+      Reports rather than assuming the federal October. */
+  fyStart: string;
+  /** False when the client source is the CRQL query or the window parameter
+      names are unset — the dates would be sent nowhere. */
+  rangeApplies: boolean;
 }) {
   const toast = useToast();
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [busyReview, setBusyReview] = useState<number | null>(null);
+  const seed = presetWindow("lastFullMonth", new Date(), fyStart);
+  const [range, setRange] = useState({ start: seed?.start ?? "", end: seed?.end ?? "" });
+  const [force, setForce] = useState(false);
+
+  function applyPreset(id: HmisWindowPreset) {
+    const win = presetWindow(id, new Date(), fyStart);
+    if (win) setRange(win);
+  }
 
   function onTest() {
     startTransition(async () => {
@@ -50,9 +77,9 @@ export function HmisPanel({ configured, stats, reviews, programs, programId }: {
   }
   function onSync() {
     startTransition(async () => {
-      const res = await runHmisSync();
+      const res = await runHmisSync(range, { force });
       toast(res.message);
-      if (res.ok) router.refresh();
+      if (res.ok) { setForce(false); router.refresh(); }
     });
   }
   function onProgram(id: string) {
@@ -80,12 +107,6 @@ export function HmisPanel({ configured, stats, reviews, programs, programId }: {
       right={
         <div style={{ display: "flex", gap: 8 }}>
           <button className="calv-btn calv-btn--quiet calv-btn--sm" disabled={pending} onClick={onTest}>Test connection</button>
-          <button className="calv-btn calv-btn--secondary calv-btn--sm" disabled={pending || !configured}
-            style={!configured ? { opacity: 0.45, cursor: "not-allowed" } : undefined}
-            title={configured ? undefined : "Set the PA HMIS connection in Settings → Integrations first"}
-            onClick={onSync}>
-            <I name="rotate" size={13} /> Run sync
-          </button>
         </div>
       }
       style={{ marginBottom: 13 }}
@@ -104,6 +125,79 @@ export function HmisPanel({ configured, stats, reviews, programs, programId }: {
           </select>
           {!programId ? <Chip tone="amber">required before imports run</Chip> : null}
         </div>
+
+        <div style={{
+          border: "1px solid var(--calv-line, #e5e7eb)", borderRadius: 8,
+          padding: 12, marginBottom: 14,
+        }}>
+          <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
+            <label style={{ fontSize: 12.5, display: "flex", flexDirection: "column", gap: 4 }}>
+              <span style={{ color: "var(--calv-slate-65)" }}>Period start</span>
+              <input type="date" value={range.start} disabled={pending}
+                onChange={(e) => setRange((r) => ({ ...r, start: e.target.value }))} />
+            </label>
+            <label style={{ fontSize: 12.5, display: "flex", flexDirection: "column", gap: 4 }}>
+              <span style={{ color: "var(--calv-slate-65)" }}>Period end</span>
+              <input type="date" value={range.end} disabled={pending}
+                onChange={(e) => setRange((r) => ({ ...r, end: e.target.value }))} />
+            </label>
+            <button className="calv-btn calv-btn--secondary calv-btn--sm"
+              disabled={pending || !configured || !range.start || !range.end}
+              style={!configured || !range.start || !range.end ? { opacity: 0.45, cursor: "not-allowed" } : undefined}
+              title={configured ? undefined : "Set the PA HMIS connection in Settings → Integrations first"}
+              onClick={onSync}>
+              <I name="rotate" size={13} /> Run sync
+            </button>
+          </div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
+            <span style={{ fontSize: 12, color: "var(--calv-slate-65)" }}>Quick pick:</span>
+            {PRESETS.map((p) => (
+              <button key={p.id} className="calv-btn calv-btn--quiet calv-btn--sm"
+                disabled={pending} onClick={() => applyPreset(p.id)}>{p.label}</button>
+            ))}
+          </div>
+          {rangeApplies ? (
+            <label style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 10, fontSize: 12.5 }}>
+              <input type="checkbox" checked={force} disabled={pending}
+                onChange={(e) => setForce(e.target.checked)} />
+              <span>
+                Re-sync a period already pulled
+                <span style={{ color: "var(--calv-slate-65)" }}>
+                  {" "}— only for data corrected on the HMIS side; normally a repeat is refused
+                </span>
+              </span>
+            </label>
+          ) : (
+            <div style={{ fontSize: 12.5, color: "var(--calv-slate-65)", marginTop: 10 }}>
+              The period is not sent: either the client source is the CRQL query (no{" "}
+              <code>WHERE</code> clause) or the window parameter names are blank in
+              Settings → Integrations. This sync will pull whatever the source returns.
+            </div>
+          )}
+        </div>
+
+        {coverage.length > 0 ? (
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 6 }}>
+              Periods already synced
+              <span style={{ fontWeight: 400, color: "var(--calv-slate-65)" }}>
+                {" "}— a repeat is refused; undoing a sync frees its period
+              </span>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              {coverage.map((p) => (
+                <div key={p.jobId} style={{ display: "flex", gap: 10, fontSize: 12.5, flexWrap: "wrap" }}>
+                  <span style={{ fontWeight: 600, minWidth: 190 }}>
+                    {describeWindow({ start: p.start, end: p.end })}
+                  </span>
+                  <span style={{ color: "var(--calv-slate-65)" }}>
+                    {fmt(p.created)} imported · {fmt(p.enriched)} blank-filled
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
         <div style={{ display: "flex", gap: 22, fontSize: 12.5, color: "var(--calv-slate-65)", flexWrap: "wrap", marginBottom: reviews.length ? 14 : 0 }}>
           {stats.at ? (
             <>

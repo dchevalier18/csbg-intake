@@ -322,6 +322,14 @@ CREATE INDEX IF NOT EXISTS idx_hmis_reviews_status ON hmis_reviews (status);
 -- be undone. Created clients carry import_job_id; everything the sync did to
 -- pre-existing records (links, queued reviews, blank-fills) is recorded here.
 ALTER TABLE import_jobs ADD COLUMN IF NOT EXISTS hmis_undo JSONB;
+-- The reporting period an HMIS sync pulled. Doubles as the coverage record:
+-- the next sync subtracts these from the range you ask for, so a period already
+-- imported is not imported twice. On the job row (not a table of its own) so an
+-- undo frees the period along with the records it created.
+ALTER TABLE import_jobs ADD COLUMN IF NOT EXISTS hmis_start TEXT;
+ALTER TABLE import_jobs ADD COLUMN IF NOT EXISTS hmis_end TEXT;
+CREATE INDEX IF NOT EXISTS idx_import_jobs_hmis_period
+  ON import_jobs (template, hmis_start) WHERE hmis_start IS NOT NULL;
 -- The HMIS connection panel was built for an OAuth2 flow the ClientTrack API
 -- (CTAPI) does not have: it authenticates with two static header keys instead.
 -- Any settings saved under the old shape are unusable and cannot be mapped

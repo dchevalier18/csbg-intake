@@ -439,6 +439,15 @@ export const importJobs = pgTable("import_jobs", {
   detail: text("detail").notNull().default(""),
   // reversal record for template 'hmis' (see HmisSyncUndo)
   hmisUndo: jsonb("hmis_undo").$type<HmisSyncUndo>(),
+  /** The reporting period an HMIS sync asked the stored procedure for (ISO
+      dates, both inclusive). This IS the coverage record: the next sync
+      subtracts every stored period from what you request, so a range already
+      pulled is not pulled again. Kept on the job rather than in a table of its
+      own so undoing a sync frees its period in the same stroke — after an undo
+      that period genuinely is not covered any more. Null for CRQL pulls and for
+      syncs that predate this. */
+  hmisStart: text("hmis_start"),
+  hmisEnd: text("hmis_end"),
   // enrollments/services this import added to pre-existing clients (undo needs them)
   additions: jsonb("additions").$type<ImportAdditions>(),
 });

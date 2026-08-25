@@ -11,34 +11,8 @@ import { useToast } from "@/components/toast";
 import { testHmisConnection } from "../../data/hmis-actions";
 // @/lib/hmis-dates, NOT @/lib/hmis: the latter imports the database layer,
 // which a client component must not pull into the browser bundle
-import {
-  DATE_RANGE_LABELS, DATE_RANGE_MODES, MAX_ROLLING_DAYS,
-  type HmisDateRange, type HmisDateRangeMode,
-} from "@/lib/hmis-dates";
+import { type HmisDateParams } from "@/lib/hmis-dates";
 import { clearHmisSettings, saveHmisSettings } from "./actions";
-
-/** What the chosen mode will resolve to, computed in the browser purely to show
-    the operator the window before they save. The value that actually gets sent
-    is resolved server-side at sync time — this is a preview, not the source. */
-function previewWindow(
-  form: { dateRangeMode: string; dateStart: string; dateEnd: string; dateDays: string },
-  fyStartIso: string,
-  todayIso: string,
-): { start: string; end: string } | null {
-  const mode = form.dateRangeMode as HmisDateRangeMode;
-  if (mode === "none") return null;
-  if (mode === "fixed") {
-    return form.dateStart && form.dateEnd ? { start: form.dateStart, end: form.dateEnd } : null;
-  }
-  if (mode === "fiscalYearToDate") return { start: fyStartIso, end: todayIso };
-  if (mode === "calendarYearToDate") return { start: `${todayIso.slice(0, 4)}-01-01`, end: todayIso };
-  const days = Number(form.dateDays);
-  if (!Number.isFinite(days) || days <= 0) return null;
-  const [y, m, d] = todayIso.split("-").map(Number);
-  const back = new Date(y, m - 1, d - days);
-  const iso = `${back.getFullYear()}-${String(back.getMonth() + 1).padStart(2, "0")}-${String(back.getDate()).padStart(2, "0")}`;
-  return { start: iso, end: todayIso };
-}
 
 export interface HmisSettingsView {
   baseUrl: string;
@@ -48,10 +22,7 @@ export interface HmisSettingsView {
   pageSize: number;
   storedProcedure: string;       // set = the client source; blank = CRQL query
   storedProcedureParams: string; // pretty-printed JSON object
-  dateRange: HmisDateRange;
-  fyLabel: string;               // e.g. "FY 2026" — what fiscal-year mode means here
-  fyStartIso: string;            // that FY's start, for the resolved-window preview
-  todayIso: string;
+  dateParams: HmisDateParams;
   source: "settings" | "environment" | null;
   envConfigured: boolean;        // HMIS_* environment variables would apply if cleared
   keysUnreadable: boolean;       // stored keys can't be decrypted on this server
@@ -70,21 +41,12 @@ export function IntegrationsClient({ initial }: { initial: HmisSettingsView }) {
     pageSize: String(initial.pageSize || 200),
     storedProcedure: initial.storedProcedure,
     storedProcedureParams: initial.storedProcedureParams || "{}",
-    dateRangeMode: initial.dateRange.mode as string,
-    dateStartKey: initial.dateRange.startKey,
-    dateEndKey: initial.dateRange.endKey,
-    dateStart: initial.dateRange.start,
-    dateEnd: initial.dateRange.end,
-    dateDays: String(initial.dateRange.days || 90),
+    dateStartKey: initial.dateParams.startKey,
+    dateEndKey: initial.dateParams.endKey,
   });
   const set = (k: keyof typeof form) =>
     (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
       setForm((f) => ({ ...f, [k]: e.target.value }));
-
-  const mode = form.dateRangeMode as HmisDateRangeMode;
-  const window = previewWindow(form, initial.fyStartIso, initial.todayIso);
-  const needsKeys = mode !== "none";
-  const missingKeys = needsKeys && (!form.dateStartKey.trim() || !form.dateEndKey.trim());
 
   function onSave() {
     startTransition(async () => {
@@ -174,75 +136,36 @@ export function IntegrationsClient({ initial }: { initial: HmisSettingsView }) {
           </Field>
         </div>
         <div style={{ borderTop: "1px solid var(--calv-line, #e5e7eb)", paddingTop: 12 }}>
-          <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 2 }}>Date range</div>
+          <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 2 }}>Reporting-window parameters</div>
           <div style={{ fontSize: 12.5, color: "var(--calv-slate-65)", marginBottom: 10 }}>
-            Optional. Sends a reporting window to the stored procedure as two of its own
-            parameters, resolved fresh on every sync — so a rolling or year-to-date window
-            keeps moving instead of freezing on the day you saved it. Leave this off and the
-            procedure&apos;s own internal filtering decides the period.
+            The procedure&apos;s own parameter names for the period. Confirmed as
+            <code> StartDate</code>/<code>EndDate</code> for CACLV&apos;s procedure. The period
+            itself is chosen for each run on{" "}
+            <Link className="tlink" href="/data">Data &amp; integrations</Link>, so every sync
+            records what it covered and a period already pulled is not pulled again.
           </div>
           <div className="fgrid c2">
-            <Field label="Window"
-              hint="Fiscal year follows Settings → Organization, so it matches what Reports calls the current FY.">
-              <select value={form.dateRangeMode} onChange={set("dateRangeMode")}>
-                {DATE_RANGE_MODES.map((m) => (
-                  <option key={m} value={m}>
-                    {m === "fiscalYearToDate" ? `${DATE_RANGE_LABELS[m]} (${initial.fyLabel})` : DATE_RANGE_LABELS[m]}
-                  </option>
-                ))}
-              </select>
+            <Field label="Start date parameter"
+              hint="Leave both blank to send no dates — the procedure's own filtering then applies.">
+              <input value={form.dateStartKey} onChange={set("dateStartKey")}
+                placeholder="StartDate" autoComplete="off" spellCheck={false} />
             </Field>
-            {mode === "rollingDays" ? (
-              <Field label="Days back" hint={`Start = today minus this many days. 1 to ${MAX_ROLLING_DAYS}.`}>
-                <input type="number" min={1} max={MAX_ROLLING_DAYS} value={form.dateDays} onChange={set("dateDays")} />
-              </Field>
-            ) : null}
+            <Field label="End date parameter" hint="Both names, or neither.">
+              <input value={form.dateEndKey} onChange={set("dateEndKey")}
+                placeholder="EndDate" autoComplete="off" spellCheck={false} />
+            </Field>
           </div>
-          {needsKeys ? (
-            <>
-              <div className="fgrid c2">
-                <Field label="Start date parameter" required
-                  hint="The procedure's own parameter name — we can't know it, so ask whoever wrote it.">
-                  <input value={form.dateStartKey} onChange={set("dateStartKey")}
-                    placeholder="StartDate" autoComplete="off" spellCheck={false} />
-                </Field>
-                <Field label="End date parameter" required hint="Must differ from the start parameter.">
-                  <input value={form.dateEndKey} onChange={set("dateEndKey")}
-                    placeholder="EndDate" autoComplete="off" spellCheck={false} />
-                </Field>
-              </div>
-              {mode === "fixed" ? (
-                <div className="fgrid c2">
-                  <Field label="Start date" required>
-                    <input type="date" value={form.dateStart} onChange={set("dateStart")} />
-                  </Field>
-                  <Field label="End date" required>
-                    <input type="date" value={form.dateEnd} onChange={set("dateEnd")} />
-                  </Field>
-                </div>
-              ) : null}
-            </>
+          {Boolean(form.dateStartKey.trim()) !== Boolean(form.dateEndKey.trim()) ? (
+            <Notice tone="warn" icon="alert">
+              Enter both names, or neither. With only one, the procedure would apply its own
+              default to the other end of the window — harder to notice than sending no dates.
+            </Notice>
           ) : null}
-          {needsKeys ? (
-            <div style={{ fontSize: 12.5, color: "var(--calv-slate-65)", marginTop: 4 }}>
-              {missingKeys ? (
-                <>Enter both parameter names — without them no dates are sent at all.</>
-              ) : window ? (
-                <>
-                  Next sync sends{" "}
-                  <code>{form.dateStartKey.trim()}={window.start}</code>{" "}
-                  and <code>{form.dateEndKey.trim()}={window.end}</code>
-                  {mode === "fixed" ? null : <> — recalculated each run.</>}
-                </>
-              ) : (
-                <>Fill in both dates to see the window this will send.</>
-              )}
-            </div>
-          ) : null}
-          {needsKeys && !form.storedProcedure.trim() ? (
+          {form.dateStartKey.trim() && !form.storedProcedure.trim() ? (
             <Notice tone="sand">
-              A date range only applies to a stored procedure. The CRQL query on <code>cmClient</code> has
-              no <code>WHERE</code> clause, so while it is the client source this window is ignored.
+              Window parameters apply to a stored procedure only. The CRQL query on
+              <code> cmClient</code> has no <code>WHERE</code> clause, so while it is the client
+              source these are ignored.
             </Notice>
           ) : null}
         </div>

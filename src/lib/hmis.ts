@@ -8,9 +8,8 @@ export * from "@/lib/hmis-dates";
 import { classifyMatches, matchKey } from "@/lib/matching";
 import { canonicalCharacteristic } from "@/lib/csbg-catalog";
 import {
-  DATE_RANGE_LABELS, DEFAULT_DATE_RANGE, MAX_ROLLING_DAYS, describeDateWindow, isIsoDate,
-  normalizeDateRange, parseDateParamsEnv, parseDateRangeEnv, resolveHmisDateWindow,
-  type HmisDateRange, type HmisDateWindow,
+  DEFAULT_DATE_PARAMS, describeWindow, normalizeDateParams, parseDateParamsEnv,
+  type HmisDateParams, type HmisDateWindow,
 } from "@/lib/hmis-dates";
 import { getActiveFpl } from "@/lib/fpl";
 import { decryptSecret } from "@/lib/secrets";
@@ -67,11 +66,11 @@ export interface HmisConfig {
   storedProcedure: string;
   /** Parameters posted as the procedure's body. `{}` when it takes none. */
   storedProcedureParams: Record<string, unknown>;
-  /** Optional reporting window, sent as two of the procedure's own parameters.
-      Resolved per request (see resolveProcedureParams) rather than stored as
-      literal dates — a window typed once into the parameters JSON freezes, and
-      a scheduled sync would keep pulling the same stale period forever. */
-  dateRange: HmisDateRange;
+  /** The procedure's own parameter names for the reporting window. Only the
+      NAMES are configuration — the window itself is chosen per sync and passed
+      through HmisRequestOptions, so the sync history can record what each run
+      covered and a period is never pulled twice. */
+  dateParams: HmisDateParams;
 }
 
 /** Prod is the only environment the Eccovia docs expose. The PA_HMIS
@@ -105,7 +104,7 @@ export function hmisConfig(): HmisConfig | null {
   if (!procedure.ok) console.warn(`[hmis] HMIS_STORED_PROCEDURE ignored — ${procedure.message}`);
   const params = parseProcedureParams(process.env.HMIS_STORED_PROCEDURE_PARAMS ?? "");
   if (!params.ok) console.warn(`[hmis] HMIS_STORED_PROCEDURE_PARAMS ignored — ${params.message}`);
-  const { startKey, endKey } = parseDateParamsEnv(process.env.HMIS_DATE_PARAMS ?? "");
+  const dateParams = parseDateParamsEnv(process.env.HMIS_DATE_PARAMS ?? "");
   return {
     baseUrl,
     subscriptionKey,
@@ -114,9 +113,7 @@ export function hmisConfig(): HmisConfig | null {
     pageSize: effectivePageSize(process.env.HMIS_PAGE_SIZE),
     storedProcedure: procedure.ok ? procedure.value : "",
     storedProcedureParams: params.ok ? params.value : {},
-    dateRange: normalizeDateRange({
-      ...parseDateRangeEnv(process.env.HMIS_DATE_RANGE ?? ""), startKey, endKey,
-    }),
+    dateParams,
   };
 }
 
@@ -135,9 +132,9 @@ export interface HmisStoredConfig {
       Neither this nor the parameters are secrets: stored plainly, displayed. */
   storedProcedure?: string;
   storedProcedureParams?: Record<string, unknown>;
-  /** Reporting window sent to the procedure. Absent on configs saved before
-      this existed, which normalizeDateRange reads as "no date parameters". */
-  dateRange?: HmisDateRange;
+  /** The procedure's parameter names for the window. Absent on configs saved
+      before this existed, which falls back to the confirmed StartDate/EndDate. */
+  dateParams?: HmisDateParams;
 }
 
 async function kvRead<T>(key: string): Promise<T | null> {
@@ -167,7 +164,7 @@ export async function getHmisConfig(): Promise<{ cfg: HmisConfig | null; source:
           pageSize: effectivePageSize(stored.pageSize),
           storedProcedure: stored.storedProcedure ?? "",
           storedProcedureParams: stored.storedProcedureParams ?? {},
-          dateRange: normalizeDateRange(stored.dateRange),
+          dateParams: normalizeDateParams(stored.dateParams),
         },
       };
     }
@@ -258,11 +255,10 @@ export interface HmisRequestOptions {
   fetchImpl?: typeof fetch;
   /** Backoff base in ms (tests pass 0 to keep the suite quick). */
   retryDelayMs?: number;
-  /** Pins "now" for date-range resolution; defaults to the current date. */
-  today?: Date;
-  /** Overrides the agency's FY start month, which is otherwise read from
-      Settings → Organization. Tests set it to avoid touching the database. */
-  fyStart?: string;
+  /** The reporting window this pull is for. Chosen per sync rather than
+      configured, so each run records exactly which period it covered. Omitted →
+      no date parameters are sent and the procedure's own filtering applies. */
+  window?: HmisDateWindow;
 }
 
 const truncate = (s: string, n = BODY_LIMIT): string => (s.length <= n ? s : `${s.slice(0, n)}…`);
@@ -446,11 +442,8 @@ export async function hmisProcedureTest(
   }
   // the same body a sync would post, so testing exercises the real window
   // rather than a bare parameter set that happens to work
-  const { params, window } = await procedureBody(cfg, opts);
-  const testRange = cfg.dateRange ?? DEFAULT_DATE_RANGE;
-  const dateNote = testRange.mode === "none"
-    ? ""
-    : ` Window — ${describeDateWindow(testRange, window)}.`;
+  const { params, window } = resolveProcedureParams(cfg, opts.window);
+  const dateNote = window ? ` Period — ${describeWindow(window)}.` : "";
   try {
     const json = await ctapiRequest(cfg, {
       method: "POST",
@@ -582,50 +575,29 @@ export function procedurePath(qualifiedName: string): string {
 export interface ResolvedProcedureParams {
   /** The body actually posted: the configured parameters plus the window. */
   params: Record<string, unknown>;
-  /** The window that was applied, or null when none was. */
+  /** The window that was applied, or null when the pull asked for none. */
   window: HmisDateWindow | null;
   /** Parameters the window replaced. A literal date left in the parameters JSON
       under the same name is shadowed rather than silently winning, and the
-      operator is told which — otherwise a stale hand-typed date and a rolling
-      window would look identical from the outside. */
+      operator is told which — otherwise a stale hand-typed date and the period
+      the sync actually asked for would look identical from the outside. */
   shadowed: string[];
 }
 
-/** The procedure body for this run: configured parameters, with the resolved
-    window written over them. Pure, so what a sync sends is assertable. */
+/** The procedure body for one pull: the configured parameters, with this run's
+    window written over them under the procedure's own parameter names. Pure, so
+    what a sync sends is assertable. */
 export function resolveProcedureParams(
   cfg: HmisConfig,
-  today: Date = new Date(),
-  fyStart = "October",
+  window?: HmisDateWindow | null,
 ): ResolvedProcedureParams {
   const base = { ...(cfg.storedProcedureParams ?? {}) };
-  const window = resolveHmisDateWindow(cfg.dateRange ?? DEFAULT_DATE_RANGE, today, fyStart);
-  if (!window) return { params: base, window: null, shadowed: [] };
-  const { startKey, endKey } = cfg.dateRange;
+  const { startKey, endKey } = cfg.dateParams ?? DEFAULT_DATE_PARAMS;
+  // both names are required: with only one, the procedure would apply its own
+  // default to the other end, which is harder to notice than sending neither
+  if (!window || !startKey || !endKey) return { params: base, window: null, shadowed: [] };
   const shadowed = [startKey, endKey].filter((k) => k in base);
   return { params: { ...base, [startKey]: window.start, [endKey]: window.end }, window, shadowed };
-}
-
-/** The agency's FY start month, for mode "fiscalYearToDate". Read here rather
-    than passed in by each caller so a call site can't silently fall back to the
-    federal October default on an agency whose year starts in July. */
-async function orgFyStart(): Promise<string> {
-  const org = (await db.select({ fyStart: t.organization.fyStart })
-    .from(t.organization).where(eq(t.organization.id, 1)))[0];
-  return org?.fyStart ?? "October";
-}
-
-/** Resolve the window for a live request: the same pure logic, with `today` and
-    the agency's FY start filled in (tests override both through opts). */
-async function procedureBody(
-  cfg: HmisConfig,
-  opts: HmisRequestOptions,
-): Promise<ResolvedProcedureParams> {
-  const range = cfg.dateRange ?? DEFAULT_DATE_RANGE;
-  const fyStart = range.mode === "fiscalYearToDate"
-    ? opts.fyStart ?? await orgFyStart()
-    : "October"; // unused by every other mode
-  return resolveProcedureParams(cfg, opts.today ?? new Date(), fyStart);
 }
 
 /* ---------- normalization ---------- */
@@ -1053,7 +1025,7 @@ export async function fetchHmisClientsFromProcedure(
   opts: HmisRequestOptions = {},
 ): Promise<HmisPull> {
   const procedure = cfg.storedProcedure;
-  const { params, window, shadowed } = await procedureBody(cfg, opts);
+  const { params, window, shadowed } = resolveProcedureParams(cfg, opts.window);
   const json = await ctapiRequest(cfg, {
     method: "POST",
     path: procedurePath(procedure),
@@ -1077,12 +1049,10 @@ export async function fetchHmisClientsFromProcedure(
   const relationships = valueCounts(result.rows, "relationship").filter((r) => r.value !== "(blank)");
   const drift = characteristicDrift(out);
   const notes: string[] = [];
-  // Reported whenever a range is configured, even on a successful pull: "the
-  // procedure returned nothing" and "we asked it for the wrong fortnight" look
-  // identical in a sync result otherwise. Silent when no range is set, so the
-  // common case doesn't grow a note that never changes.
-  const range = cfg.dateRange ?? DEFAULT_DATE_RANGE;
-  if (range.mode !== "none") notes.push(describeDateWindow(range, window));
+  // Reported even on a successful pull: "the procedure returned nothing" and
+  // "we asked it for the wrong fortnight" look identical in a sync result
+  // otherwise. Silent when the pull asked for no window at all.
+  if (window) notes.push(`period requested: ${describeWindow(window)}`);
   if (shadowed.length > 0) {
     notes.push(`date range replaced parameter(s) also set in the parameters JSON: ${shadowed.join(", ")}`);
   }

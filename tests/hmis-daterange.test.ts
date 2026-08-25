@@ -1,21 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
-  DEFAULT_DATE_RANGE, MAX_ROLLING_DAYS, describeDateWindow, fetchHmisClients,
-  normalizeDateRange, parseDateParamsEnv, parseDateRangeEnv, resolveHmisDateWindow,
-  resolveProcedureParams, type HmisConfig, type HmisDateRange,
+  DEFAULT_DATE_PARAMS, assessCoverage, dayCount, describeWindow, fetchHmisClients,
+  mergeRanges, normalizeDateParams, parseDateParamsEnv, presetWindow, resolveProcedureParams,
+  subtractRanges, validateWindow, type HmisConfig, type HmisDateWindow,
 } from "../src/lib/hmis";
 
-/* The date window handed to the stored procedure. Resolution is pure — `today`
-   and the FY start month are arguments — so a rolling window is assertable
-   without mocking the clock. Nothing here touches api.clienttrack.net. */
+/* The period a sync asks the stored procedure for, and the interval arithmetic
+   that stops two syncs pulling the same days twice. All pure — `today` and the
+   FY start month are arguments — so nothing here mocks the clock or touches
+   api.clienttrack.net. */
 
-const PROC = "dbo.C_Report_Placeholder_API";
-// a Wednesday mid-FY: October start means FY 2026 began 2025-10-01
 const TODAY = new Date(2026, 5, 15); // 2026-06-15
-
-const range = (over: Partial<HmisDateRange> = {}): HmisDateRange => ({
-  ...DEFAULT_DATE_RANGE, startKey: "StartDate", endKey: "EndDate", ...over,
-});
+const w = (start: string, end: string): HmisDateWindow => ({ start, end });
 
 const cfg = (over: Partial<HmisConfig> = {}): HmisConfig => ({
   baseUrl: "https://api.clienttrack.net",
@@ -23,193 +19,238 @@ const cfg = (over: Partial<HmisConfig> = {}): HmisConfig => ({
   apiKey: "api-key-placeholder",
   orgId: "",
   pageSize: 200,
-  storedProcedure: PROC,
+  storedProcedure: "dbo.C_Report_Placeholder_API",
   storedProcedureParams: {},
-  dateRange: DEFAULT_DATE_RANGE,
+  dateParams: DEFAULT_DATE_PARAMS,
   ...over,
 });
 
-describe("resolveHmisDateWindow", () => {
-  it("sends nothing when no range is configured", () => {
-    expect(resolveHmisDateWindow(range({ mode: "none" }), TODAY)).toBeNull();
+describe("date parameters", () => {
+  it("defaults to the names PA HMIS confirmed", () => {
+    expect(DEFAULT_DATE_PARAMS).toEqual({ startKey: "StartDate", endKey: "EndDate" });
   });
 
-  it("refuses a window it can't name — both parameter names are required", () => {
-    // half a window is worse than none: the procedure would default the other end
-    expect(resolveHmisDateWindow(range({ mode: "fiscalYearToDate", startKey: "" }), TODAY)).toBeNull();
-    expect(resolveHmisDateWindow(range({ mode: "fiscalYearToDate", endKey: "" }), TODAY)).toBeNull();
+  it("reads a config saved before this existed as the confirmed names", () => {
+    // not as "send nothing", which would silently become an unbounded pull
+    expect(normalizeDateParams(undefined)).toEqual(DEFAULT_DATE_PARAMS);
   });
 
-  it("resolves a fixed range verbatim", () => {
-    const r = range({ mode: "fixed", start: "2026-01-01", end: "2026-03-31" });
-    expect(resolveHmisDateWindow(r, TODAY)).toEqual({ start: "2026-01-01", end: "2026-03-31" });
+  it("keeps a deliberate one-sided config so the form can reject it", () => {
+    expect(normalizeDateParams({ startKey: "From", endKey: "" })).toEqual({ startKey: "From", endKey: "" });
   });
 
-  it("rejects a fixed range that is incomplete or backwards", () => {
-    expect(resolveHmisDateWindow(range({ mode: "fixed", start: "2026-01-01", end: "" }), TODAY)).toBeNull();
-    expect(resolveHmisDateWindow(range({ mode: "fixed", start: "2026-05-01", end: "2026-04-01" }), TODAY)).toBeNull();
-  });
-
-  it("rolls a day window back from today, inclusive of today as the end", () => {
-    expect(resolveHmisDateWindow(range({ mode: "rollingDays", days: 30 }), TODAY))
-      .toEqual({ start: "2026-05-16", end: "2026-06-15" });
-  });
-
-  it("crosses month and year boundaries when rolling back", () => {
-    const newYear = new Date(2026, 0, 10); // 2026-01-10
-    expect(resolveHmisDateWindow(range({ mode: "rollingDays", days: 30 }), newYear))
-      .toEqual({ start: "2025-12-11", end: "2026-01-10" });
-  });
-
-  it("uses the agency's fiscal-year start, not a hardcoded October", () => {
-    const r = range({ mode: "fiscalYearToDate" });
-    // federal default: FY 2026 runs Oct 1 2025 – Sep 30 2026
-    expect(resolveHmisDateWindow(r, TODAY, "October")).toEqual({ start: "2025-10-01", end: "2026-06-15" });
-    // an agency on a July year is mid-FY2026 on the same day, from 2025-07-01
-    expect(resolveHmisDateWindow(r, TODAY, "July")).toEqual({ start: "2025-07-01", end: "2026-06-15" });
-    // January start coincides with the calendar year
-    expect(resolveHmisDateWindow(r, TODAY, "January")).toEqual({ start: "2026-01-01", end: "2026-06-15" });
-  });
-
-  it("runs calendar year to date from January 1", () => {
-    expect(resolveHmisDateWindow(range({ mode: "calendarYearToDate" }), TODAY))
-      .toEqual({ start: "2026-01-01", end: "2026-06-15" });
+  it("reads the env pair, falling back to the defaults", () => {
+    expect(parseDateParamsEnv("From, To")).toEqual({ startKey: "From", endKey: "To" });
+    expect(parseDateParamsEnv("")).toEqual(DEFAULT_DATE_PARAMS);
   });
 });
 
 describe("resolveProcedureParams", () => {
-  it("leaves the configured parameters alone when no range is set", () => {
-    const c = cfg({ storedProcedureParams: { Year: 2026 } });
-    const out = resolveProcedureParams(c, TODAY);
+  it("sends no dates when the pull asked for no window", () => {
+    const out = resolveProcedureParams(cfg({ storedProcedureParams: { Year: 2026 } }), null);
     expect(out.params).toEqual({ Year: 2026 });
     expect(out.window).toBeNull();
-    expect(out.shadowed).toEqual([]);
   });
 
-  it("adds the window alongside the configured parameters", () => {
-    const c = cfg({
-      storedProcedureParams: { Year: 2026 },
-      dateRange: range({ mode: "calendarYearToDate" }),
-    });
-    const out = resolveProcedureParams(c, TODAY);
-    expect(out.params).toEqual({ Year: 2026, StartDate: "2026-01-01", EndDate: "2026-06-15" });
+  it("writes the window under the procedure's parameter names", () => {
+    const out = resolveProcedureParams(cfg({ storedProcedureParams: { Year: 2026 } }), w("2026-01-01", "2026-03-31"));
+    expect(out.params).toEqual({ Year: 2026, StartDate: "2026-01-01", EndDate: "2026-03-31" });
+  });
+
+  it("honors renamed parameters", () => {
+    const out = resolveProcedureParams(
+      cfg({ dateParams: { startKey: "From", endKey: "To" } }), w("2026-01-01", "2026-03-31"));
+    expect(out.params).toEqual({ From: "2026-01-01", To: "2026-03-31" });
+  });
+
+  it("sends nothing when only one name is configured", () => {
+    // a half window is worse than none: the procedure defaults the other end
+    const out = resolveProcedureParams(
+      cfg({ dateParams: { startKey: "StartDate", endKey: "" } }), w("2026-01-01", "2026-03-31"));
+    expect(out.params).toEqual({});
+    expect(out.window).toBeNull();
   });
 
   it("shadows a literal date left in the parameters JSON, and reports it", () => {
-    // the whole point of the feature: a hand-typed date must not win over the
-    // rolling window, and the operator has to be told it was replaced
-    const c = cfg({
-      storedProcedureParams: { StartDate: "2020-01-01", Other: "keep" },
-      dateRange: range({ mode: "calendarYearToDate" }),
-    });
-    const out = resolveProcedureParams(c, TODAY);
+    const out = resolveProcedureParams(
+      cfg({ storedProcedureParams: { StartDate: "2020-01-01", Other: "keep" } }), w("2026-01-01", "2026-03-31"));
     expect(out.params.StartDate).toBe("2026-01-01");
     expect(out.params.Other).toBe("keep");
     expect(out.shadowed).toEqual(["StartDate"]);
   });
 });
 
-describe("normalizeDateRange", () => {
-  it("reads a config saved before the feature existed as 'no dates'", () => {
-    expect(normalizeDateRange(undefined).mode).toBe("none");
+describe("presets", () => {
+  it("uses the agency's fiscal-year start, not a hardcoded October", () => {
+    expect(presetWindow("fiscalYearToDate", TODAY, "October")).toEqual(w("2025-10-01", "2026-06-15"));
+    expect(presetWindow("fiscalYearToDate", TODAY, "July")).toEqual(w("2025-07-01", "2026-06-15"));
+    expect(presetWindow("fiscalYearToDate", TODAY, "January")).toEqual(w("2026-01-01", "2026-06-15"));
   });
 
-  it("falls back to none on an unrecognized mode rather than throwing", () => {
-    // the settings page has to render in order to fix a bad value
-    expect(normalizeDateRange({ mode: "lastTuesday" }).mode).toBe("none");
+  it("runs calendar year to date from January 1", () => {
+    expect(presetWindow("calendarYearToDate", TODAY)).toEqual(w("2026-01-01", "2026-06-15"));
   });
 
-  it("clamps a nonsense day count", () => {
-    expect(normalizeDateRange({ mode: "rollingDays", days: -5 }).days).toBe(DEFAULT_DATE_RANGE.days);
-    expect(normalizeDateRange({ mode: "rollingDays", days: 99999 }).days).toBe(MAX_ROLLING_DAYS);
-  });
-
-  it("trims parameter names", () => {
-    expect(normalizeDateRange({ startKey: "  StartDate " }).startKey).toBe("StartDate");
+  it("gives the whole previous calendar month", () => {
+    expect(presetWindow("lastFullMonth", TODAY)).toEqual(w("2026-05-01", "2026-05-31"));
+    // across a year boundary
+    expect(presetWindow("lastFullMonth", new Date(2026, 0, 10))).toEqual(w("2025-12-01", "2025-12-31"));
   });
 });
 
-describe("environment fallback", () => {
-  it("reads the parameter names as a pair", () => {
-    expect(parseDateParamsEnv("StartDate, EndDate")).toEqual({ startKey: "StartDate", endKey: "EndDate" });
+describe("validateWindow", () => {
+  it("requires both ends", () => {
+    expect(validateWindow({ start: "2026-01-01", end: "" }).ok).toBe(false);
   });
-
-  it("understands the compact range specs", () => {
-    expect(parseDateRangeEnv("fy").mode).toBe("fiscalYearToDate");
-    expect(parseDateRangeEnv("cy").mode).toBe("calendarYearToDate");
-    expect(parseDateRangeEnv("rolling:45")).toMatchObject({ mode: "rollingDays", days: 45 });
-    expect(parseDateRangeEnv("2026-01-01..2026-06-30"))
-      .toMatchObject({ mode: "fixed", start: "2026-01-01", end: "2026-06-30" });
+  it("rejects a backwards range", () => {
+    expect(validateWindow({ start: "2026-05-01", end: "2026-04-01" }).ok).toBe(false);
   });
-
-  it("ignores an unparseable spec instead of guessing", () => {
-    expect(parseDateRangeEnv("last-quarter-ish").mode).toBe("none");
+  it("accepts a single day", () => {
+    expect(validateWindow({ start: "2026-01-01", end: "2026-01-01" }).ok).toBe(true);
   });
 });
 
-describe("describeDateWindow", () => {
-  it("names the parameters and values it sent", () => {
-    const r = range({ mode: "rollingDays", days: 30 });
-    const w = resolveHmisDateWindow(r, TODAY)!;
-    expect(describeDateWindow(r, w)).toBe("Rolling window (last 30 days): StartDate=2026-05-16, EndDate=2026-06-15");
+describe("mergeRanges", () => {
+  it("merges overlapping windows", () => {
+    expect(mergeRanges([w("2026-01-01", "2026-02-15"), w("2026-02-01", "2026-03-31")]))
+      .toEqual([w("2026-01-01", "2026-03-31")]);
   });
 
-  it("says why nothing was sent when the names are missing", () => {
-    const r = range({ mode: "fiscalYearToDate", startKey: "" });
-    expect(describeDateWindow(r, null)).toContain("parameter names are blank");
+  it("merges windows that merely touch", () => {
+    // Jan 1-31 then Feb 1-28 is one unbroken stretch, not two with a gap
+    expect(mergeRanges([w("2026-01-01", "2026-01-31"), w("2026-02-01", "2026-02-28")]))
+      .toEqual([w("2026-01-01", "2026-02-28")]);
+  });
+
+  it("keeps genuinely separate windows apart", () => {
+    // a one-day hole on Feb 1 is a real gap
+    expect(mergeRanges([w("2026-01-01", "2026-01-31"), w("2026-02-02", "2026-02-28")]))
+      .toEqual([w("2026-01-01", "2026-01-31"), w("2026-02-02", "2026-02-28")]);
+  });
+
+  it("absorbs a window fully inside another, in any order", () => {
+    expect(mergeRanges([w("2026-02-01", "2026-02-10"), w("2026-01-01", "2026-12-31")]))
+      .toEqual([w("2026-01-01", "2026-12-31")]);
+  });
+});
+
+describe("subtractRanges", () => {
+  it("returns the whole request when nothing was synced before", () => {
+    expect(subtractRanges(w("2026-01-01", "2026-03-31"), []))
+      .toEqual([w("2026-01-01", "2026-03-31")]);
+  });
+
+  it("returns nothing when the request was already fully synced", () => {
+    expect(subtractRanges(w("2026-02-01", "2026-02-28"), [w("2026-01-01", "2026-12-31")]))
+      .toEqual([]);
+  });
+
+  it("returns nothing for an exact repeat", () => {
+    expect(subtractRanges(w("2026-01-01", "2026-03-31"), [w("2026-01-01", "2026-03-31")]))
+      .toEqual([]);
+  });
+
+  it("trims a leading overlap", () => {
+    expect(subtractRanges(w("2026-01-01", "2026-03-31"), [w("2026-01-01", "2026-01-31")]))
+      .toEqual([w("2026-02-01", "2026-03-31")]);
+  });
+
+  it("trims a trailing overlap", () => {
+    expect(subtractRanges(w("2026-01-01", "2026-03-31"), [w("2026-03-01", "2026-03-31")]))
+      .toEqual([w("2026-01-01", "2026-02-28")]);
+  });
+
+  it("splits around a covered island, leaving two gaps", () => {
+    expect(subtractRanges(w("2026-01-01", "2026-03-31"), [w("2026-02-01", "2026-02-28")]))
+      .toEqual([w("2026-01-01", "2026-01-31"), w("2026-03-01", "2026-03-31")]);
+  });
+
+  it("ignores covered windows entirely outside the request", () => {
+    expect(subtractRanges(w("2026-06-01", "2026-06-30"), [w("2025-01-01", "2025-12-31"), w("2027-01-01", "2027-01-31")]))
+      .toEqual([w("2026-06-01", "2026-06-30")]);
+  });
+});
+
+describe("assessCoverage", () => {
+  it("flags an exact repeat as fully covered", () => {
+    const v = assessCoverage(w("2026-01-01", "2026-03-31"), [w("2026-01-01", "2026-03-31")]);
+    expect(v.fullyCovered).toBe(true);
+    expect(v.untouched).toBe(false);
+    expect(v.gaps).toEqual([]);
+  });
+
+  it("flags a brand-new period as untouched", () => {
+    const v = assessCoverage(w("2026-04-01", "2026-06-30"), [w("2026-01-01", "2026-03-31")]);
+    expect(v.untouched).toBe(true);
+    expect(v.fullyCovered).toBe(false);
+  });
+
+  it("reports the gaps and the overlap on a partial repeat", () => {
+    const v = assessCoverage(w("2026-01-01", "2026-06-30"), [w("2026-01-01", "2026-03-31")]);
+    expect(v.fullyCovered).toBe(false);
+    expect(v.untouched).toBe(false);
+    expect(v.gaps).toEqual([w("2026-04-01", "2026-06-30")]);
+    expect(v.overlapping).toEqual([w("2026-01-01", "2026-03-31")]);
+  });
+});
+
+describe("describeWindow / dayCount", () => {
+  it("names a same-year span once", () => {
+    expect(describeWindow(w("2026-01-01", "2026-03-31"))).toBe("Jan 1 – Mar 31, 2026");
+  });
+  it("names both years on a span that crosses one", () => {
+    expect(describeWindow(w("2025-10-01", "2026-06-15"))).toBe("Oct 1, 2025 – Jun 15, 2026");
+  });
+  it("collapses a single day", () => {
+    expect(describeWindow(w("2026-01-01", "2026-01-01"))).toBe("Jan 1, 2026");
+  });
+  it("counts days inclusively", () => {
+    expect(dayCount(w("2026-01-01", "2026-01-31"))).toBe(31);
+    expect(dayCount(w("2026-01-01", "2026-01-01"))).toBe(1);
   });
 });
 
 describe("the window reaches the request body", () => {
-  it("posts the resolved dates to the procedure endpoint", async () => {
+  const okResponse = () => ({
+    ok: true, status: 200,
+    json: async () => ({ output: [], result: { table1: [] } }),
+    text: async () => "",
+  } as unknown as Response);
+
+  it("posts the requested period to the procedure endpoint", async () => {
     let body: unknown;
-    const fetchImpl = (async (_input: URL | RequestInfo, init?: RequestInit) => {
+    const fetchImpl = (async (_i: URL | RequestInfo, init?: RequestInit) => {
       body = JSON.parse(String(init?.body));
-      return {
-        ok: true,
-        status: 200,
-        json: async () => ({ output: [], result: { table1: [] } }),
-        text: async () => "",
-      } as unknown as Response;
+      return okResponse();
     }) as unknown as typeof fetch;
 
-    const c = cfg({ dateRange: range({ mode: "fixed", start: "2026-02-01", end: "2026-02-28" }) });
-    const pull = await fetchHmisClients(c, { fetchImpl, retryDelayMs: 0, today: TODAY });
+    const pull = await fetchHmisClients(cfg(),
+      { fetchImpl, retryDelayMs: 0, window: w("2026-02-01", "2026-02-28") });
     expect(body).toEqual({ StartDate: "2026-02-01", EndDate: "2026-02-28" });
-    expect(pull.dateWindow).toEqual({ start: "2026-02-01", end: "2026-02-28" });
+    expect(pull.dateWindow).toEqual(w("2026-02-01", "2026-02-28"));
   });
 
-  it("posts a bare parameter set when no range is configured", async () => {
+  it("posts a bare parameter set when no window is given", async () => {
     let body: unknown;
-    const fetchImpl = (async (_input: URL | RequestInfo, init?: RequestInit) => {
+    const fetchImpl = (async (_i: URL | RequestInfo, init?: RequestInit) => {
       body = JSON.parse(String(init?.body));
-      return {
-        ok: true,
-        status: 200,
-        json: async () => ({ output: [], result: { table1: [] } }),
-        text: async () => "",
-      } as unknown as Response;
+      return okResponse();
     }) as unknown as typeof fetch;
 
-    const pull = await fetchHmisClients(cfg(), { fetchImpl, retryDelayMs: 0, today: TODAY });
+    const pull = await fetchHmisClients(cfg(), { fetchImpl, retryDelayMs: 0 });
     expect(body).toEqual({});
     expect(pull.dateWindow).toBeNull();
   });
 
   it("never applies a window to the CRQL path, which has no WHERE clause", async () => {
     const urls: string[] = [];
-    const fetchImpl = (async (input: URL | RequestInfo) => {
-      urls.push(String(input));
-      return {
-        ok: true,
-        status: 200,
-        json: async () => ({}),
-        text: async () => "",
-      } as unknown as Response;
+    const fetchImpl = (async (i: URL | RequestInfo) => {
+      urls.push(String(i));
+      return { ok: true, status: 200, json: async () => ({}), text: async () => "" } as unknown as Response;
     }) as unknown as typeof fetch;
 
-    const c = cfg({ storedProcedure: "", dateRange: range({ mode: "calendarYearToDate" }) });
-    const pull = await fetchHmisClients(c, { fetchImpl, retryDelayMs: 0, today: TODAY });
+    const pull = await fetchHmisClients(cfg({ storedProcedure: "" }),
+      { fetchImpl, retryDelayMs: 0, window: w("2026-02-01", "2026-02-28") });
     expect(pull.source).toBe("crql");
     expect(pull.dateWindow).toBeNull();
     expect(urls.join(" ")).not.toContain("StartDate");

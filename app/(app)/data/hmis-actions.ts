@@ -3,14 +3,15 @@
    understanding, synced records feed internal tracking & reporting:
    dedup-linked, blank-filled, and imported into the client directory. */
 import { revalidatePath } from "next/cache";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db, t } from "@/db";
 import { requireAdmin } from "@/lib/auth";
 import { audit } from "@/lib/access";
 import { kvGet, kvSet, nextClientId } from "@/lib/data/core";
 import { fmt, shortDate, todayIso } from "@/lib/format";
 import {
-  createClientFromHmis, fetchHmisClients, getHmisConfig, hmisConnectionTest, runHmisMatching,
+  assessCoverage, createClientFromHmis, describeWindow, describeWindows, fetchHmisClients,
+  getHmisConfig, hmisConnectionTest, runHmisMatching, validateWindow,
 } from "@/lib/hmis";
 
 export interface HmisActionResult { ok: boolean; message: string }
@@ -59,17 +60,93 @@ export async function setHmisProgram(programId: string): Promise<HmisActionResul
   return { ok: true, message: `HMIS imports will enroll into ${program.name}.` };
 }
 
-/** Pull the CACLV-project snapshot, refresh hmis_clients wholesale, and run
+/** Periods already pulled, newest first. The import-job rows ARE the coverage
+    record, so undoing a sync frees its period in the same stroke. */
+export async function getHmisCoverage(): Promise<HmisSyncPeriod[]> {
+  await requireAdmin();
+  const rows = await db.select({
+    jobId: t.importJobs.id,
+    at: t.importJobs.at,
+    start: t.importJobs.hmisStart,
+    end: t.importJobs.hmisEnd,
+    pulled: t.importJobs.imported,
+    updated: t.importJobs.updated,
+  }).from(t.importJobs).where(eq(t.importJobs.template, "hmis"));
+  return rows
+    .filter((r): r is typeof r & { start: string; end: string } => Boolean(r.start && r.end))
+    .sort((a, b) => b.start.localeCompare(a.start))
+    .map((r) => ({
+      jobId: r.jobId, at: r.at, start: r.start, end: r.end,
+      created: r.pulled, enriched: r.updated,
+    }));
+}
+
+export interface HmisSyncPeriod {
+  jobId: number;
+  at: string;
+  start: string;
+  end: string;
+  created: number;
+  enriched: number;
+}
+
+/** Pull one reporting period, merge it into the hmis_clients snapshot, and run
     the integration pass: link, fill blanks, queue near matches, and import
-    unmatched people as client records (internal tracking & reporting). */
-export async function runHmisSync(): Promise<HmisActionResult> {
+    unmatched people as client records (internal tracking & reporting).
+
+    The period is explicit rather than configured, and every completed sync
+    records the window it covered — so asking for days already pulled is caught
+    here instead of quietly re-importing them. `force` overrides that for a
+    deliberate re-pull (data corrected on the HMIS side, say). */
+export async function runHmisSync(
+  requested: { start: string; end: string },
+  opts: { force?: boolean } = {},
+): Promise<HmisActionResult> {
   const user = await requireAdmin();
   const { cfg } = await getHmisConfig();
   if (!cfg) return { ok: false, message: NOT_CONFIGURED };
 
+  const valid = validateWindow(requested);
+  if (!valid.ok) return { ok: false, message: valid.message };
+  let window = valid.value;
+
+  // Coverage is only meaningful for the procedure path — the CRQL query has no
+  // WHERE clause, so it always returns everything regardless of the dates.
+  const rangeApplies = Boolean(cfg.storedProcedure && cfg.dateParams.startKey && cfg.dateParams.endKey);
+  let narrowed: string | null = null;
+  if (rangeApplies && !opts.force) {
+    const covered = (await getHmisCoverage()).map((p) => ({ start: p.start, end: p.end }));
+    const verdict = assessCoverage(window, covered);
+    if (verdict.fullyCovered) {
+      return {
+        ok: false,
+        message: `${describeWindow(window)} has already been synced`
+          + ` (covered by ${describeWindows(verdict.overlapping)}).`
+          + " Pick a different period, or re-sync it deliberately to pull corrected HMIS data.",
+      };
+    }
+    if (!verdict.untouched) {
+      // One contiguous gap can simply be pulled. Several means the request
+      // straddles covered islands, and silently issuing one POST per gap would
+      // make a single click fan out into several production calls.
+      if (verdict.gaps.length === 1) {
+        narrowed = `narrowed to ${describeWindow(verdict.gaps[0])} — the rest was already synced`
+          + ` (${describeWindows(verdict.overlapping)})`;
+        window = verdict.gaps[0];
+      } else {
+        return {
+          ok: false,
+          message: `Part of ${describeWindow(window)} was already synced`
+            + ` (${describeWindows(verdict.overlapping)}), leaving more than one gap:`
+            + ` ${describeWindows(verdict.gaps)}. Sync those one at a time.`,
+        };
+      }
+    }
+  }
+
   let pull;
   try {
-    pull = await fetchHmisClients(cfg);
+    pull = await fetchHmisClients(cfg, { window });
   } catch (e) {
     return { ok: false, message: `Sync failed while pulling from PA HMIS: ${e instanceof Error ? e.message : String(e)}` };
   }
@@ -83,6 +160,7 @@ export async function runHmisSync(): Promise<HmisActionResult> {
     return {
       ok: false,
       message: `PA HMIS answered but ${where} produced no client records`
+        + `${pull.dateWindow ? ` for ${describeWindow(pull.dateWindow)}` : ""}`
         + `${pull.rawRowCount > 0 ? ` from ${fmt(pull.rawRowCount)} returned row(s)` : ""}.`
         + `${pull.note ? ` ${pull.note}.` : pull.source === "crql"
           ? " Verify the CRQL column names in CRQL_CLIENT_FIELDS against the API docs."
@@ -90,12 +168,28 @@ export async function runHmisSync(): Promise<HmisActionResult> {
     };
   }
 
-  // full-snapshot semantics: replace the table with this pull
+  // Merge, don't replace. This used to delete the table first, which was right
+  // while every sync pulled everything — but a sync now covers one period, and
+  // wiping the table would drop every earlier period's rows, leaving the
+  // organization-wide unduplicated count on /reports reflecting only the most
+  // recent window. Upsert on hmis_id (the PK, and the durable HMIS link key)
+  // keeps prior periods and refreshes anyone this pull saw again.
   const now = new Date().toISOString();
-  await db.delete(t.hmisClients);
   const CHUNK = 500;
   for (let i = 0; i < rows.length; i += CHUNK) {
-    await db.insert(t.hmisClients).values(rows.slice(i, i + CHUNK).map((r) => ({ ...r, fetchedAt: now })));
+    await db.insert(t.hmisClients)
+      .values(rows.slice(i, i + CHUNK).map((r) => ({ ...r, fetchedAt: now })))
+      .onConflictDoUpdate({
+        target: t.hmisClients.hmisId,
+        set: {
+          first: sql`excluded.first`, last: sql`excluded.last`, dob: sql`excluded.dob`,
+          email: sql`excluded.email`, phone: sql`excluded.phone`, sex: sql`excluded.sex`,
+          race: sql`excluded.race`, veteran: sql`excluded.veteran`,
+          insurance: sql`excluded.insurance`, incomeSrc: sql`excluded.income_src`,
+          nonCash: sql`excluded.non_cash`, services: sql`excluded.services`,
+          household: sql`excluded.household`, fetchedAt: sql`excluded.fetched_at`,
+        },
+      });
   }
 
   // Logged as an import job before the pass runs, so created clients can carry
@@ -111,6 +205,9 @@ export async function runHmisSync(): Promise<HmisActionResult> {
     skipped: 0,
     staffId: user.id,
     detail: "",
+    // the coverage record — read back by getHmisCoverage on the next sync
+    hmisStart: pull.dateWindow?.start ?? null,
+    hmisEnd: pull.dateWindow?.end ?? null,
   }).returning({ id: t.importJobs.id });
 
   const programId = await kvGet<string | null>("hmisProgramId", null);
@@ -119,7 +216,8 @@ export async function runHmisSync(): Promise<HmisActionResult> {
     imported: stats.created,
     updated: stats.enriched,
     skipped: stats.noDob + stats.noProgram,
-    detail: `${fmt(rows.length)} pulled — ${stats.autoLinked} auto-linked, ${stats.queued} queued for review`,
+    detail: `${pull.dateWindow ? `${describeWindow(pull.dateWindow)} · ` : ""}`
+      + `${fmt(rows.length)} pulled — ${stats.autoLinked} auto-linked, ${stats.queued} queued for review`,
     hmisUndo: undo,
   }).where(eq(t.importJobs.id, job.id));
   await kvSet("hmisSync", { at: now, pulled: rows.length, ...stats });
@@ -128,6 +226,7 @@ export async function runHmisSync(): Promise<HmisActionResult> {
     .where(eq(t.integrations.id, "hmis"));
   await audit(user.id, "hmis.sync", "integration", "hmis",
     `${fmt(rows.length)} pulled from ${pull.source === "procedure" ? pull.procedure : "CRQL cmClient"}`
+    + `${pull.dateWindow ? ` for ${describeWindow(pull.dateWindow)}` : ""}`
     + `${pull.note ? ` [${pull.note}]` : ""} — ${stats.alreadyLinked} already linked, ${stats.autoLinked} auto-linked, ${stats.enriched} blank-filled, ${stats.created} imported as clients, ${stats.queued} queued for review${stats.noDob ? `, ${stats.noDob} without DOB` : ""}${stats.noProgram ? `, ${stats.noProgram} skipped (no enrollment program set)` : ""}`);
   revalidatePath("/data");
   revalidatePath("/reports");
@@ -150,9 +249,14 @@ export async function runHmisSync(): Promise<HmisActionResult> {
   // understand is reported here rather than left in a server log
   const sourceLabel = pull.source === "procedure" ? `${pull.procedure}` : "the CRQL query";
   const mapping = pull.note ? ` Note: ${pull.note}.` : "";
+  const period = pull.dateWindow ? ` for ${describeWindow(pull.dateWindow)}` : "";
+  // said plainly: the operator asked for one period and got another, and the
+  // coverage record will show the narrowed one, not what they typed
+  const narrowNote = narrowed ? ` This run was ${narrowed}.` : "";
   return {
     ok: true,
-    message: `Synced ${fmt(rows.length)} HMIS records from ${sourceLabel} — ${parts.join(", ")}.${caveat}${mapping}`,
+    message: `Synced ${fmt(rows.length)} HMIS records${period} from ${sourceLabel}`
+      + ` — ${parts.join(", ")}.${narrowNote}${caveat}${mapping}`,
   };
 }
 
