@@ -1,8 +1,16 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { db, t } from "@/db";
 import type { HmisSyncUndo } from "@/db/schema";
+// The window logic lives in @/lib/hmis-dates because it must be importable
+// from client components, which cannot pull in the database layer this module
+// depends on. Re-exported so server-side callers still have one import site.
+export * from "@/lib/hmis-dates";
 import { classifyMatches, matchKey } from "@/lib/matching";
 import { canonicalCharacteristic } from "@/lib/csbg-catalog";
+import {
+  DEFAULT_DATE_PARAMS, describeWindow, normalizeDateParams, parseDateParamsEnv,
+  type HmisDateParams, type HmisDateWindow,
+} from "@/lib/hmis-dates";
 import { getActiveFpl } from "@/lib/fpl";
 import { decryptSecret } from "@/lib/secrets";
 
@@ -58,6 +66,11 @@ export interface HmisConfig {
   storedProcedure: string;
   /** Parameters posted as the procedure's body. `{}` when it takes none. */
   storedProcedureParams: Record<string, unknown>;
+  /** The procedure's own parameter names for the reporting window. Only the
+      NAMES are configuration — the window itself is chosen per sync and passed
+      through HmisRequestOptions, so the sync history can record what each run
+      covered and a period is never pulled twice. */
+  dateParams: HmisDateParams;
 }
 
 /** Prod is the only environment the Eccovia docs expose. The PA_HMIS
@@ -91,6 +104,7 @@ export function hmisConfig(): HmisConfig | null {
   if (!procedure.ok) console.warn(`[hmis] HMIS_STORED_PROCEDURE ignored — ${procedure.message}`);
   const params = parseProcedureParams(process.env.HMIS_STORED_PROCEDURE_PARAMS ?? "");
   if (!params.ok) console.warn(`[hmis] HMIS_STORED_PROCEDURE_PARAMS ignored — ${params.message}`);
+  const dateParams = parseDateParamsEnv(process.env.HMIS_DATE_PARAMS ?? "");
   return {
     baseUrl,
     subscriptionKey,
@@ -99,6 +113,7 @@ export function hmisConfig(): HmisConfig | null {
     pageSize: effectivePageSize(process.env.HMIS_PAGE_SIZE),
     storedProcedure: procedure.ok ? procedure.value : "",
     storedProcedureParams: params.ok ? params.value : {},
+    dateParams,
   };
 }
 
@@ -117,6 +132,9 @@ export interface HmisStoredConfig {
       Neither this nor the parameters are secrets: stored plainly, displayed. */
   storedProcedure?: string;
   storedProcedureParams?: Record<string, unknown>;
+  /** The procedure's parameter names for the window. Absent on configs saved
+      before this existed, which falls back to the confirmed StartDate/EndDate. */
+  dateParams?: HmisDateParams;
 }
 
 async function kvRead<T>(key: string): Promise<T | null> {
@@ -146,6 +164,7 @@ export async function getHmisConfig(): Promise<{ cfg: HmisConfig | null; source:
           pageSize: effectivePageSize(stored.pageSize),
           storedProcedure: stored.storedProcedure ?? "",
           storedProcedureParams: stored.storedProcedureParams ?? {},
+          dateParams: normalizeDateParams(stored.dateParams),
         },
       };
     }
@@ -236,6 +255,10 @@ export interface HmisRequestOptions {
   fetchImpl?: typeof fetch;
   /** Backoff base in ms (tests pass 0 to keep the suite quick). */
   retryDelayMs?: number;
+  /** The reporting window this pull is for. Chosen per sync rather than
+      configured, so each run records exactly which period it covered. Omitted →
+      no date parameters are sent and the procedure's own filtering applies. */
+  window?: HmisDateWindow;
 }
 
 const truncate = (s: string, n = BODY_LIMIT): string => (s.length <= n ? s : `${s.slice(0, n)}…`);
@@ -417,7 +440,10 @@ export async function hmisProcedureTest(
   if (!procedure) {
     return { ...base, ok: true, message: "No stored procedure set; sync will use the CRQL query." };
   }
-  const params = cfg.storedProcedureParams ?? {};
+  // the same body a sync would post, so testing exercises the real window
+  // rather than a bare parameter set that happens to work
+  const { params, window } = resolveProcedureParams(cfg, opts.window);
+  const dateNote = window ? ` Period — ${describeWindow(window)}.` : "";
   try {
     const json = await ctapiRequest(cfg, {
       method: "POST",
@@ -444,17 +470,19 @@ export async function hmisProcedureTest(
         rowCount: result.rows.length,
         columns,
         relationships,
-        message: `${procedure} returned ${result.rows.length} row(s). Columns: ${columns.join(", ")}.${shape}${extra}${outputs}`,
+        message: `${procedure} returned ${result.rows.length} row(s). Columns: ${columns.join(", ")}.${shape}${extra}${outputs}${dateNote}`,
       };
     }
     if (result.message) {
       return {
         ...base,
         ok: true,
-        message: `${procedure} ran and returned a message rather than rows: ${truncate(result.message, 200)}${extra}`,
+        message: `${procedure} ran and returned a message rather than rows: ${truncate(result.message, 200)}${extra}${dateNote}`,
       };
     }
-    return { ...base, ok: true, message: `${procedure} ran and returned an empty result (no rows).${extra}` };
+    // an empty result is exactly where the window matters most: with one
+    // configured, "no rows" may mean the period is wrong rather than the query
+    return { ...base, ok: true, message: `${procedure} ran and returned an empty result (no rows).${extra}${dateNote}` };
   } catch (e) {
     if (e instanceof HmisAuthError) {
       return { ...base, ok: false, message: authFailureMessage(e.kind, procedure) };
@@ -542,6 +570,34 @@ export function parseProcedureParams(raw: string): ProcedureParamsResult {
     the encoding here is belt and braces rather than the guard itself. */
 export function procedurePath(qualifiedName: string): string {
   return `/crql/storedprocedures/${encodeURIComponent(qualifiedName)}`;
+}
+
+export interface ResolvedProcedureParams {
+  /** The body actually posted: the configured parameters plus the window. */
+  params: Record<string, unknown>;
+  /** The window that was applied, or null when the pull asked for none. */
+  window: HmisDateWindow | null;
+  /** Parameters the window replaced. A literal date left in the parameters JSON
+      under the same name is shadowed rather than silently winning, and the
+      operator is told which — otherwise a stale hand-typed date and the period
+      the sync actually asked for would look identical from the outside. */
+  shadowed: string[];
+}
+
+/** The procedure body for one pull: the configured parameters, with this run's
+    window written over them under the procedure's own parameter names. Pure, so
+    what a sync sends is assertable. */
+export function resolveProcedureParams(
+  cfg: HmisConfig,
+  window?: HmisDateWindow | null,
+): ResolvedProcedureParams {
+  const base = { ...(cfg.storedProcedureParams ?? {}) };
+  const { startKey, endKey } = cfg.dateParams ?? DEFAULT_DATE_PARAMS;
+  // both names are required: with only one, the procedure would apply its own
+  // default to the other end, which is harder to notice than sending neither
+  if (!window || !startKey || !endKey) return { params: base, window: null, shadowed: [] };
+  const shadowed = [startKey, endKey].filter((k) => k in base);
+  return { params: { ...base, [startKey]: window.start, [endKey]: window.end }, window, shadowed };
 }
 
 /* ---------- normalization ---------- */
@@ -865,6 +921,9 @@ export interface HmisPull {
       `TOP` bounded before paging applied, so the caller reports the ambiguity
       rather than claiming a complete snapshot. See the integration profile. */
   singlePageCapped: boolean;
+  /** The date window sent to the stored procedure, or null when none was —
+      either no range is configured, or this pull came from CRQL. */
+  dateWindow: HmisDateWindow | null;
   /** Rows the API returned, before mapping. */
   rawRowCount: number;
   /** Rows dropped for want of a recognizable client ID and name. */
@@ -940,6 +999,8 @@ export async function fetchHmisClientsFromCrql(cfg: HmisConfig, opts: HmisReques
     procedure: null,
     pages,
     singlePageCapped: pages === 2 && firstPageRows === pageSize && lastPageRows === 0,
+    // the CRQL query carries no WHERE clause, so a date range never applies here
+    dateWindow: null,
     rawRowCount: seenRaw.length,
     droppedRows: dropped,
     unmappedColumns: unmappedColumns(seenRaw),
@@ -964,7 +1025,7 @@ export async function fetchHmisClientsFromProcedure(
   opts: HmisRequestOptions = {},
 ): Promise<HmisPull> {
   const procedure = cfg.storedProcedure;
-  const params = cfg.storedProcedureParams ?? {};
+  const { params, window, shadowed } = resolveProcedureParams(cfg, opts.window);
   const json = await ctapiRequest(cfg, {
     method: "POST",
     path: procedurePath(procedure),
@@ -988,6 +1049,13 @@ export async function fetchHmisClientsFromProcedure(
   const relationships = valueCounts(result.rows, "relationship").filter((r) => r.value !== "(blank)");
   const drift = characteristicDrift(out);
   const notes: string[] = [];
+  // Reported even on a successful pull: "the procedure returned nothing" and
+  // "we asked it for the wrong fortnight" look identical in a sync result
+  // otherwise. Silent when the pull asked for no window at all.
+  if (window) notes.push(`period requested: ${describeWindow(window)}`);
+  if (shadowed.length > 0) {
+    notes.push(`date range replaced parameter(s) also set in the parameters JSON: ${shadowed.join(", ")}`);
+  }
   if (result.message) notes.push(`CTAPI message: ${truncate(result.message, 160)}`);
   if (result.extraTables.length > 0) {
     notes.push(`additional result sets not read: ${result.extraTables.join(", ")}`);
@@ -1021,6 +1089,7 @@ export async function fetchHmisClientsFromProcedure(
     procedure,
     pages: 1,
     singlePageCapped: false,
+    dateWindow: window,
     rawRowCount: result.rows.length,
     droppedRows: dropped,
     unmappedColumns: unmapped,

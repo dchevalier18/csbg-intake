@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   CTAPI_MAX_PAGE_SIZE, HmisAuthError, HmisHttpError, crqlRows, effectivePageSize,
   fetchHmisClients, hmisAuthTest, hmisEnvironmentName, type HmisConfig,
+  DEFAULT_DATE_PARAMS,
 } from "../src/lib/hmis";
 
 /* CTAPI transport tests. The HTTP layer is stubbed through the fetchImpl option
@@ -16,6 +17,7 @@ const cfg = (over: Partial<HmisConfig> = {}): HmisConfig => ({
   pageSize: 200,
   storedProcedure: "",           // blank = these all exercise the CRQL path
   storedProcedureParams: {},
+  dateParams: DEFAULT_DATE_PARAMS,
   ...over,
 });
 

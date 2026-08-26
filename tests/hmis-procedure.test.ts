@@ -3,6 +3,7 @@ import {
   HmisAuthError, authFailureMessage, classifyAuthFailure, columnNames, crqlRows,
   fetchHmisClients, hmisProcedureTest, normalizeProcedureName, parseProcedureParams,
   procedurePath, procedureResult, unmappedColumns, valueCounts, type HmisConfig,
+  DEFAULT_DATE_PARAMS,
 } from "../src/lib/hmis";
 
 /* Stored-procedure client source. The HTTP layer is stubbed through fetchImpl —
@@ -21,6 +22,7 @@ const cfg = (over: Partial<HmisConfig> = {}): HmisConfig => ({
   pageSize: 200,
   storedProcedure: PROC,
   storedProcedureParams: {},
+  dateParams: DEFAULT_DATE_PARAMS,
   ...over,
 });
 

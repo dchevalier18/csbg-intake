@@ -11,8 +11,8 @@ import { audit } from "@/lib/access";
 import { kvGet, kvSet } from "@/lib/data/core";
 import { encryptSecret } from "@/lib/secrets";
 import {
-  CTAPI_BASE_URL, CTAPI_MAX_PAGE_SIZE, effectivePageSize, normalizeProcedureName,
-  parseProcedureParams, type HmisStoredConfig,
+  CTAPI_BASE_URL, CTAPI_MAX_PAGE_SIZE, effectivePageSize, normalizeDateParams,
+  normalizeProcedureName, parseProcedureParams, type HmisStoredConfig,
 } from "@/lib/hmis";
 
 export interface SettingsResult { ok: boolean; message: string }
@@ -25,6 +25,10 @@ export interface HmisSettingsInput {
   pageSize: string;
   storedProcedure: string;        // blank = sync from the CRQL query instead
   storedProcedureParams: string;  // JSON object; blank = {}
+  /** The procedure's own parameter names for the reporting window. The window
+      itself is chosen per sync on Data & integrations, not stored here. */
+  dateStartKey: string;
+  dateEndKey: string;
 }
 
 /** CTAPI rejects plain HTTP, so http:// is a validation error rather than a
@@ -63,6 +67,12 @@ export async function saveHmisSettings(input: HmisSettingsInput): Promise<Settin
   if (!procedure.ok) return { ok: false, message: procedure.message };
   const params = parseProcedureParams(input.storedProcedureParams);
   if (!params.ok) return { ok: false, message: params.message };
+  // Names only — both or neither. One name alone would have the procedure
+  // default the other end of the window, which is harder to spot than no dates.
+  const dateParams = normalizeDateParams({ startKey: input.dateStartKey, endKey: input.dateEndKey });
+  if (Boolean(dateParams.startKey) !== Boolean(dateParams.endKey)) {
+    return { ok: false, message: "Enter both window parameter names, or neither." };
+  }
 
   const stored: HmisStoredConfig = {
     baseUrl,
@@ -72,15 +82,20 @@ export async function saveHmisSettings(input: HmisSettingsInput): Promise<Settin
     pageSize,
     storedProcedure: procedure.value,
     storedProcedureParams: params.value,
+    dateParams,
   };
   await kvSet("hmisConn", stored);
   // endpoints, scope and source only — neither key, nor any part of one, is
   // ever audited; parameter KEYS only, since a value could carry identifiers
   const paramKeys = Object.keys(params.value);
+  const windowNote = dateParams.startKey
+    ? `window parameters ${dateParams.startKey}/${dateParams.endKey}`
+    : "no window parameters (the procedure's own filtering applies)";
   await audit(user.id, "hmis.settings.save", "integration", "hmis",
     `Connection saved — ${baseUrl}${stored.orgId ? `, OrgId ${stored.orgId}` : ""}, page size ${pageSize}`
     + `, client source ${procedure.value ? `stored procedure ${procedure.value}` : "CRQL query on cmClient"}`
     + (procedure.value && paramKeys.length ? ` (parameters: ${paramKeys.join(", ")})` : "")
+    + `, ${windowNote}`
     + ` (subscription key ${subscriptionKeyInput ? "replaced" : "unchanged"}, API key ${apiKeyInput ? "replaced" : "unchanged"})`);
   revalidatePath("/settings/integrations");
   revalidatePath("/data");
@@ -91,6 +106,14 @@ export async function saveHmisSettings(input: HmisSettingsInput): Promise<Settin
   notes.push(procedure.value
     ? `clients will sync from ${procedure.value}`
     : "clients will sync from the CRQL query");
+  if (dateParams.startKey) {
+    notes.push(windowNote);
+    // saved, but inert: the CRQL query has no WHERE clause to put dates in, so
+    // say so now rather than let someone wonder why the period did nothing
+    if (!procedure.value) {
+      notes.push("window parameters apply to a stored procedure only and are ignored while the CRQL query is the source");
+    }
+  }
   return { ok: true, message: `HMIS connection saved — ${notes.join("; ")}. Use Test connection to verify it.` };
 }
 

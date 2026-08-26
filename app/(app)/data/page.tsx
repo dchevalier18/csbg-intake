@@ -8,12 +8,20 @@ import { importTemplate } from "@/lib/import-templates";
 import { localDateOf, shortDate } from "@/lib/format";
 import { DataClient, type MatchingStats, type ReviewRow } from "./data-client";
 import { HmisPanel, type HmisReviewItem, type HmisSyncStats } from "./hmis-panel";
-import { hmisConfigured } from "@/lib/hmis";
+import { getHmisConfig, hmisConfigured } from "@/lib/hmis";
+import { getHmisCoverage } from "./hmis-actions";
 
 export default async function DataPage() {
   await requireAdmin();
 
   const integrations = await db.select().from(t.integrations);
+  const org = (await db.select({ fyStart: t.organization.fyStart })
+    .from(t.organization).where(eq(t.organization.id, 1)))[0];
+  const hmisCoverage = await getHmisCoverage();
+  // dates only reach the procedure path, and only with both parameter names set
+  const { cfg: hmisCfg } = await getHmisConfig();
+  const hmisRangeApplies = Boolean(
+    hmisCfg?.storedProcedure && hmisCfg.dateParams.startKey && hmisCfg.dateParams.endKey);
   const kvMatching = await kvGet<MatchingStats>("matching", { auto: 0, staff: 0, awaiting: 0, silent: 0 });
 
   // Duplicate review queue — `awaiting` is the LIVE pending count, not a stored stat.
@@ -129,6 +137,9 @@ export default async function DataPage() {
       reviews={hmisReviews}
       programs={programs.map((p) => ({ id: p.id, name: p.name }))}
       programId={hmisProgramId}
+      coverage={hmisCoverage}
+      fyStart={org?.fyStart ?? "October"}
+      rangeApplies={hmisRangeApplies}
     />
     </>
   );

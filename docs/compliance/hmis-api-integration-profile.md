@@ -283,7 +283,8 @@ procedure name and its parameter *keys* (never values) are logged alongside any
 ## Configuration
 
 Primary: **Settings → Integrations** (admin-only) — base URL, subscription key,
-API key, Org ID, page size. Saved to the database and applied immediately, no
+API key, Org ID, page size, stored procedure and its parameters, and the
+optional **date range** (below). Saved to the database and applied immediately, no
 restart; suits hosted tiers (Apache/Ubuntu, Docker) where staff have no shell
 access. Both keys are write-only in the UI (never sent back to the browser,
 never audited) and **encrypted at rest** with AES-256-GCM (`src/lib/secrets.ts`).
@@ -306,6 +307,8 @@ HMIS_ORG_ID=            # optional, User Keys only
 HMIS_PAGE_SIZE=         # optional, default 200, max 500 (CRQL only)
 HMIS_STORED_PROCEDURE=  # optional; set = the client source, blank = CRQL query
 HMIS_STORED_PROCEDURE_PARAMS=  # optional JSON object, default {}
+HMIS_DATE_PARAMS=       # optional "StartDate,EndDate" — both required or neither applies
+HMIS_DATE_RANGE=        # optional fy | cy | rolling:<days> | <start>..<end>
 ```
 
 Credentials rest inside the app database (encrypted) or the server's
@@ -359,6 +362,65 @@ pull + integration pass). Admin-only.
    required rather than optional.
 7. **Rate limits for the initial backfill**, and whether the list should filter
    on `ActiveStatus` rather than merely select it.
+8. **Whether the procedure has an internal date window of its own.** The
+   parameter names are settled — `StartDate` and `EndDate`, confirmed with the
+   HMIS engineer — and CAP Trellis now sends a period on every sync (below). What
+   is still unknown is whether the SQL *also* filters internally, because that
+   filter would apply underneath whatever we send. It matters: if the procedure
+   narrows to, say, the last 90 days regardless, then asking for FY2025 returns
+   only the overlap, the sync records FY2025 as covered, and the missing months
+   are never pulled again without a deliberate re-sync. Confirm before relying on
+   the coverage record for a backfill.
+
+## Reporting period (per sync)
+
+Each sync asks for one period and records it. Applies to the stored procedure
+only — the CRQL query carries no `WHERE` clause, so a period set while CRQL is
+the client source is inert and both the sync panel and the settings form say so.
+
+**Parameter names** are configuration (Settings → Integrations), defaulting to
+the confirmed `StartDate`/`EndDate`. Both are required: with one, the procedure
+would apply its own default to the other end, and a half-specified window is
+harder to notice than none. A literal date left in the parameters JSON under one
+of those names is shadowed by the period and reported, so a leftover cannot
+quietly override what the sync asked for.
+
+**The window is chosen per run** on Data & integrations, with quick picks for
+last full month, fiscal year to date (the agency's FY start month, matching
+Reports), and calendar year to date. It is deliberately *not* stored: the point
+is that each run covers a stated period and the history records which.
+
+### Coverage — how a repeat is prevented
+
+A completed sync writes its window to `import_jobs.hmis_start` / `hmis_end`.
+That row **is** the coverage record; there is no separate table, so undoing a
+sync frees its period along with the records it created — after an undo, that
+period genuinely is not covered.
+
+The next sync subtracts every stored period from the request
+(`subtractRanges`, `assessCoverage` in `src/lib/hmis-dates.ts`; adjacency
+counts, so Jan 1–31 followed by Feb 1–28 is one unbroken stretch, not two with a
+phantom gap between them):
+
+| Request vs coverage | What happens |
+|---|---|
+| No overlap | pulled as asked |
+| Exactly or fully covered | **refused**, naming the periods that cover it |
+| Partly covered, one gap left | **narrowed to the gap**, and the result says so |
+| Partly covered, several gaps | refused, listing the gaps to run one at a time |
+
+The multi-gap case is refused rather than looped because one click should not
+fan out into several production calls against PA HMIS. A checkbox forces a
+re-sync of an already-covered period, for data corrected on the HMIS side.
+
+### Snapshot semantics: merge, not replace
+
+`hmis_clients` **upserts on `hmis_id`**. It used to be deleted and reinserted
+wholesale, which was correct while every sync pulled everything — but with
+per-period syncing a full replace would drop every earlier period's rows, and
+the organization-wide unduplicated total on `/reports` would silently reflect
+only the most recent window. Upserting keeps prior periods and refreshes anyone
+a later pull sees again.
 
 ## Disposition of electronic files (MOU condition)
 

@@ -1,7 +1,8 @@
 import { requireAdmin } from "@/lib/auth";
 import { kvGet } from "@/lib/data/core";
 import {
-  CTAPI_BASE_URL, getHmisConfig, hmisConfig, hmisKeysUnreadable, type HmisStoredConfig,
+  CTAPI_BASE_URL, getHmisConfig, hmisConfig, hmisKeysUnreadable, normalizeDateParams,
+  type HmisStoredConfig,
 } from "@/lib/hmis";
 import { IntegrationsClient, type HmisSettingsView } from "./integrations-client";
 
@@ -16,6 +17,7 @@ export default async function IntegrationsSettingsPage() {
   // Only ever booleans for the keys — the ciphertext stays server-side too.
   // The procedure name and its parameters are not secrets and round-trip.
   const params = stored.storedProcedureParams ?? {};
+  const dateParams = normalizeDateParams(stored.dateParams);
   const view: HmisSettingsView = {
     baseUrl: stored.baseUrl ?? CTAPI_BASE_URL,
     hasSubscriptionKey: Boolean(stored.subscriptionKey),
@@ -24,6 +26,7 @@ export default async function IntegrationsSettingsPage() {
     pageSize: stored.pageSize ?? 200,
     storedProcedure: stored.storedProcedure ?? "",
     storedProcedureParams: JSON.stringify(params, null, 2),
+    dateParams,
     source,
     envConfigured: hmisConfig() !== null,
     keysUnreadable: await hmisKeysUnreadable(),

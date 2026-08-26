@@ -3,7 +3,7 @@
    leans on. Verifies the Postgres port without needing a server: `npm run smoke` */
 import { PGlite } from "@electric-sql/pglite";
 import { drizzle } from "drizzle-orm/pglite";
-import { eq, and } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import * as schema from "../src/db/schema";
 import { BOOTSTRAP } from "../src/db/ddl";
@@ -146,6 +146,43 @@ async function main(): Promise<void> {
     storedJob?.hmisUndo?.links[0]?.externalId === "H1"
     && storedJob?.hmisUndo?.reviewIds[0] === 7
     && storedJob?.hmisUndo?.enriched[0]?.before.phone === null);
+
+  // The synced period lives on the job row and IS the coverage record, so an
+  // undo frees it. Round-trip both columns, and prove the hmis_clients upsert
+  // keeps an earlier period's rows instead of replacing them.
+  const [periodJob] = await db.insert(t.importJobs).values({
+    at: new Date().toISOString(), template: "hmis", filename: "dbo.Example_API",
+    imported: 3, updated: 1, skipped: 0, staffId: users[0].id, detail: "smoke",
+    hmisStart: "2026-01-01", hmisEnd: "2026-03-31",
+  }).returning({ id: t.importJobs.id });
+  const storedPeriod = (await db.select().from(t.importJobs).where(eq(t.importJobs.id, periodJob.id)))[0];
+  check("import_jobs records the synced period",
+    storedPeriod?.hmisStart === "2026-01-01" && storedPeriod?.hmisEnd === "2026-03-31",
+    `${storedPeriod?.hmisStart} → ${storedPeriod?.hmisEnd}`);
+
+  await db.insert(t.hmisClients).values({
+    hmisId: "H-Q1", first: "Quarter", last: "One", dob: "1990-01-01",
+    services: [], household: [], fetchedAt: new Date().toISOString(),
+  });
+  await db.insert(t.hmisClients).values({
+    hmisId: "H-Q2", first: "Quarter", last: "Two", dob: "1991-02-02",
+    services: [], household: [], fetchedAt: new Date().toISOString(),
+  }).onConflictDoUpdate({
+    target: t.hmisClients.hmisId,
+    set: { first: sql`excluded.first`, fetchedAt: sql`excluded.fetched_at` },
+  });
+  check("second period's snapshot rows join the first (no full replace)",
+    (await db.select().from(t.hmisClients)).length === 2);
+  await db.insert(t.hmisClients).values({
+    hmisId: "H-Q1", first: "Quarter", last: "One-Renamed", dob: "1990-01-01",
+    services: [], household: [], fetchedAt: "2026-04-01T00:00:00Z",
+  }).onConflictDoUpdate({
+    target: t.hmisClients.hmisId,
+    set: { last: sql`excluded.last`, fetchedAt: sql`excluded.fetched_at` },
+  });
+  const requeried = await db.select().from(t.hmisClients);
+  check("a person seen again is refreshed, not duplicated",
+    requeried.length === 2 && requeried.find((r) => r.hmisId === "H-Q1")?.last === "One-Renamed");
 
   const [sheetJob] = await db.insert(t.importJobs).values({
     at: new Date().toISOString(), template: "clients", filename: "legacy.csv",

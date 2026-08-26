@@ -9,6 +9,9 @@ import { Chip, Field, Notice, Panel } from "@/components/ui";
 import { I } from "@/components/icons";
 import { useToast } from "@/components/toast";
 import { testHmisConnection } from "../../data/hmis-actions";
+// @/lib/hmis-dates, NOT @/lib/hmis: the latter imports the database layer,
+// which a client component must not pull into the browser bundle
+import { type HmisDateParams } from "@/lib/hmis-dates";
 import { clearHmisSettings, saveHmisSettings } from "./actions";
 
 export interface HmisSettingsView {
@@ -19,6 +22,7 @@ export interface HmisSettingsView {
   pageSize: number;
   storedProcedure: string;       // set = the client source; blank = CRQL query
   storedProcedureParams: string; // pretty-printed JSON object
+  dateParams: HmisDateParams;
   source: "settings" | "environment" | null;
   envConfigured: boolean;        // HMIS_* environment variables would apply if cleared
   keysUnreadable: boolean;       // stored keys can't be decrypted on this server
@@ -37,9 +41,11 @@ export function IntegrationsClient({ initial }: { initial: HmisSettingsView }) {
     pageSize: String(initial.pageSize || 200),
     storedProcedure: initial.storedProcedure,
     storedProcedureParams: initial.storedProcedureParams || "{}",
+    dateStartKey: initial.dateParams.startKey,
+    dateEndKey: initial.dateParams.endKey,
   });
   const set = (k: keyof typeof form) =>
-    (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+    (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
       setForm((f) => ({ ...f, [k]: e.target.value }));
 
   function onSave() {
@@ -128,6 +134,40 @@ export function IntegrationsClient({ initial }: { initial: HmisSettingsView }) {
             <textarea value={form.storedProcedureParams} onChange={set("storedProcedureParams")}
               rows={3} spellCheck={false} style={{ fontFamily: "var(--calv-mono, monospace)", fontSize: 12.5 }} />
           </Field>
+        </div>
+        <div style={{ borderTop: "1px solid var(--calv-line, #e5e7eb)", paddingTop: 12 }}>
+          <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 2 }}>Reporting-window parameters</div>
+          <div style={{ fontSize: 12.5, color: "var(--calv-slate-65)", marginBottom: 10 }}>
+            The procedure&apos;s own parameter names for the period. Confirmed as
+            <code> StartDate</code>/<code>EndDate</code> for CACLV&apos;s procedure. The period
+            itself is chosen for each run on{" "}
+            <Link className="tlink" href="/data">Data &amp; integrations</Link>, so every sync
+            records what it covered and a period already pulled is not pulled again.
+          </div>
+          <div className="fgrid c2">
+            <Field label="Start date parameter"
+              hint="Leave both blank to send no dates — the procedure's own filtering then applies.">
+              <input value={form.dateStartKey} onChange={set("dateStartKey")}
+                placeholder="StartDate" autoComplete="off" spellCheck={false} />
+            </Field>
+            <Field label="End date parameter" hint="Both names, or neither.">
+              <input value={form.dateEndKey} onChange={set("dateEndKey")}
+                placeholder="EndDate" autoComplete="off" spellCheck={false} />
+            </Field>
+          </div>
+          {Boolean(form.dateStartKey.trim()) !== Boolean(form.dateEndKey.trim()) ? (
+            <Notice tone="warn" icon="alert">
+              Enter both names, or neither. With only one, the procedure would apply its own
+              default to the other end of the window — harder to notice than sending no dates.
+            </Notice>
+          ) : null}
+          {form.dateStartKey.trim() && !form.storedProcedure.trim() ? (
+            <Notice tone="sand">
+              Window parameters apply to a stored procedure only. The CRQL query on
+              <code> cmClient</code> has no <code>WHERE</code> clause, so while it is the client
+              source these are ignored.
+            </Notice>
+          ) : null}
         </div>
         <div style={{ fontSize: 12.5, color: "var(--calv-slate-65)" }}>
           <strong>Client source:</strong>{" "}
