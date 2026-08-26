@@ -30,8 +30,11 @@ export default async function ProgramPage({ params }: { params: Promise<{ id: st
   const fy = await orgFY();
 
   // enrolled clients on this program (access already verified above)
-  const memberIds = (await db.select().from(t.clientPrograms)
-    .where(eq(t.clientPrograms.programId, p.id))).map((m) => m.clientId);
+  const enrollments = await db.select().from(t.clientPrograms)
+    .where(eq(t.clientPrograms.programId, p.id));
+  const memberIds = enrollments.map((m) => m.clientId);
+  // when THIS program's enrollment began, per client
+  const enrolledOn = new Map(enrollments.map((m) => [m.clientId, m.enrolled]));
   const members = memberIds.length
     ? (await db.select().from(t.clients).where(inArray(t.clients.id, memberIds)))
         .filter((c) => c.status === "active")
@@ -54,14 +57,21 @@ export default async function ProgramPage({ params }: { params: Promise<{ id: st
   const staffMap = new Map((await getStaff()).map((u) => [u.id, u]));
   const memberRows: MemberRow[] = await Promise.all(members.map(async (c) => {
     const st = await fplStatusFor(c.income, c.hhSize, c.fplYear, p.fplCeiling ?? org.csbgCeiling);
+    const enrolled = enrolledOn.get(c.id) ?? null;
     return {
       id: c.id,
       name: c.first + " " + c.last,
       hh: (c.hhType ?? "—") + " · " + c.hhSize,
       fplLabel: st.label,
       fplTone: st.tone,
+      fplPct: st.pct,
       pct: completenessPct(c, fields),
       worker: staffMap.get(c.caseworkerId ?? "")?.name ?? "—",
+      enrolled,
+      // Equal to the client-level date means it was almost certainly backfilled
+      // from it (enrollments predating per-program dates), so the column flags
+      // it rather than implying this program recorded that day.
+      enrolledInferred: enrolled !== null && enrolled === c.enrolled,
     };
   }));
 
@@ -121,10 +131,9 @@ export default async function ProgramPage({ params }: { params: Promise<{ id: st
       ) : null}
 
       <div className="row2">
-        <Panel title="Enrolled clients" sub={members.length + " households on this program"}>
-          {memberRows.length === 0
-            ? <div className="empty">No enrollments yet — start with a new intake.</div>
-            : <MembersTable rows={memberRows} />}
+        <Panel title="Enrolled clients"
+          sub={members.length + " households on this program · showing this calendar year by default"}>
+          <MembersTable rows={memberRows} />
         </Panel>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 13 }}>

@@ -374,7 +374,10 @@ export async function commitImport(
         const already = enrolledByClient.get(existingId) ?? [];
         const addedProgram = !already.includes(programId);
         if (addedProgram) {
-          await db.insert(t.clientPrograms).values({ clientId: existingId, programId });
+          // this row's own enrolled date, not the client record's: a legacy export
+          // lists one row per program, and the second program may have started years
+          // after the first — which is exactly what a per-program date is for
+          await db.insert(t.clientPrograms).values({ clientId: existingId, programId, enrolled });
           enrolledByClient.set(existingId, [...already, programId]);
           additions.enrollments.push({ clientId: existingId, programId });
         }
@@ -479,7 +482,7 @@ export async function commitImport(
         status: "active",
         createdAt: now,
       });
-      await db.insert(t.clientPrograms).values({ clientId, programId });
+      await db.insert(t.clientPrograms).values({ clientId, programId, enrolled });
       if (serviceCode) {
         await db.insert(t.serviceLog).values({
           date: serviceDate,
@@ -898,7 +901,9 @@ export async function resolveMatchReview(id: number, action: ReviewAction): Prom
       .where(eq(t.clientPrograms.clientId, existing.id)))
       .some((m) => m.programId === p.programId);
     if (!enrolled) {
-      await db.insert(t.clientPrograms).values({ clientId: existing.id, programId: p.programId });
+      await db.insert(t.clientPrograms).values({
+        clientId: existing.id, programId: p.programId, enrolled: todayIso(),
+      });
     }
     if (p.serviceCode && p.serviceDate) {
       await db.insert(t.serviceLog).values({
@@ -938,7 +943,9 @@ export async function resolveMatchReview(id: number, action: ReviewAction): Prom
       status: "active",
       createdAt: now,
     });
-    await db.insert(t.clientPrograms).values({ clientId, programId: p.programId });
+    await db.insert(t.clientPrograms).values({
+      clientId, programId: p.programId, enrolled: p.client.enrolled ?? todayIso(),
+    });
     if (p.serviceCode && p.serviceDate) {
       await db.insert(t.serviceLog).values({
         date: p.serviceDate, clientId, code: p.serviceCode, programId: p.programId,

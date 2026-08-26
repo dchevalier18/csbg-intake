@@ -224,7 +224,11 @@ export async function runSeed(db: DB): Promise<void> {
   ];
   await db.insert(t.clients).values(clients.map(({ programs: _p, ...c }) => ({ ...c, status: "active", createdAt: now })));
   await db.insert(t.clientPrograms).values(
-    clients.flatMap((c) => c.programs.map((programId) => ({ clientId: c.id, programId }))),
+    // per-program enrollment date: the DDL backfill runs before this seed, so
+    // rows inserted here have to carry their own date or they land undated
+    clients.flatMap((c) => c.programs.map((programId) => ({
+      clientId: c.id, programId, enrolled: c.enrolled,
+    }))),
   );
 
   // ---------- Applications (pre-enrollment pipeline) ----------

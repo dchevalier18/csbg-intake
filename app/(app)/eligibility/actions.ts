@@ -550,7 +550,9 @@ export async function approveApplication(appId: string, dup?: DuplicateChoice): 
 
     await db.transaction(async (tx) => {
       if (!already) {
-        await tx.insert(t.clientPrograms).values({ clientId: existing.id, programId: app.programId });
+        await tx.insert(t.clientPrograms).values({
+          clientId: existing.id, programId: app.programId, enrolled: todayIso(),
+        });
       }
       await tx.update(t.applications).set({
         stage: "approved",
@@ -620,7 +622,9 @@ export async function approveApplication(appId: string, dup?: DuplicateChoice): 
       status: "active",
       createdAt: now,
     });
-    await tx.insert(t.clientPrograms).values({ clientId, programId: app.programId });
+    await tx.insert(t.clientPrograms).values({
+      clientId, programId: app.programId, enrolled: todayIso(),
+    });
     await tx.update(t.applications).set({
       stage: "approved",
       clientId,

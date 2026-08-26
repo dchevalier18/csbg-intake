@@ -141,6 +141,13 @@ export const clients = pgTable("clients", {
 export const clientPrograms = pgTable("client_programs", {
   clientId: text("client_id").notNull(),
   programId: text("program_id").notNull(),
+  /** When THIS program's enrollment began (ISO date). Per-program, unlike
+      clients.enrolled: a client enrolled in one program in 2019 and added to
+      another in 2026 has two different dates, and only this one can say so.
+      Backfilled from clients.enrolled for rows that predate the column. */
+  enrolled: text("enrolled"),
+  /** Set when the client leaves this program; null while enrolled. */
+  exited: text("exited"),
 }, (t) => [primaryKey({ columns: [t.clientId, t.programId] })]);
 
 // ---------- Applications (pre-enrollment eligibility pipeline) ----------

@@ -318,6 +318,16 @@ CREATE TABLE IF NOT EXISTS hmis_reviews (
   resolution TEXT, resolved_client_id TEXT, resolved_by TEXT, resolved_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_hmis_reviews_status ON hmis_reviews (status);
+-- Per-program enrollment dates. clients.enrolled is one date for the whole
+-- record, which cannot describe a client enrolled in one program in 2019 and
+-- added to another in 2026 — and per-program period reporting needs that.
+ALTER TABLE client_programs ADD COLUMN IF NOT EXISTS enrolled TEXT;
+ALTER TABLE client_programs ADD COLUMN IF NOT EXISTS exited TEXT;
+-- Backfill rows that predate the column from the client-level date: the best
+-- evidence available for an enrollment nobody dated at the time. Only fills
+-- NULLs, so it is idempotent and never overwrites a real per-program date.
+UPDATE client_programs cp SET enrolled = c.enrolled
+  FROM clients c WHERE cp.client_id = c.id AND cp.enrolled IS NULL;
 -- HMIS syncs are logged as import jobs so they appear in Recent imports and can
 -- be undone. Created clients carry import_job_id; everything the sync did to
 -- pre-existing records (links, queued reviews, blank-fills) is recorded here.
