@@ -72,7 +72,24 @@ async function main(): Promise<void> {
     { programId: "cad-a", code: "SRV 4e" },
   ]);
   const psRows = await db.select().from(t.programServices).where(eq(t.programServices.programId, "cad-a"));
-  check("program_services roundtrip", psRows.length === 2, `got ${psRows.length}`);
+  // Per-program enrollment dates: seeded rows carry their own, and the DDL
+  // backfill fills any row that predates the column.
+  const enrollments = await db.select().from(t.clientPrograms);
+  check("client_programs.enrolled is populated for seeded enrollments",
+    enrollments.length > 0 && enrollments.every((m) => Boolean(m.enrolled)),
+    `${enrollments.filter((m) => m.enrolled).length}/${enrollments.length} dated`);
+  const firstClientEnrollments = enrollments.filter((m) => m.clientId === enrollments[0].clientId);
+  check("client_programs is keyed per (client, program)", firstClientEnrollments.length >= 1);
+
+  await db.insert(t.clientPrograms).values({ clientId: clients[0].id, programId: "wx-undated-test" });
+  await pglite.exec("UPDATE client_programs cp SET enrolled = c.enrolled FROM clients c WHERE cp.client_id = c.id AND cp.enrolled IS NULL");
+  const backfilled = (await db.select().from(t.clientPrograms)
+    .where(and(eq(t.clientPrograms.clientId, clients[0].id), eq(t.clientPrograms.programId, "wx-undated-test"))))[0];
+  check("undated enrollment backfills from the client record",
+    backfilled?.enrolled === clients[0].enrolled, `${backfilled?.enrolled} vs ${clients[0].enrolled}`);
+  await db.delete(t.clientPrograms).where(eq(t.clientPrograms.programId, "wx-undated-test"));
+
+  check("program_services roundtrip",psRows.length === 2, `got ${psRows.length}`);
   await db.delete(t.programServices).where(eq(t.programServices.programId, "cad-a"));
 
   // transaction commit + rollback semantics (the approve flow uses a transaction)

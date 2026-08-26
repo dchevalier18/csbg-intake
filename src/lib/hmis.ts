@@ -1183,7 +1183,9 @@ export async function createClientFromHmis(
     createdAt: now,
     importJobId: jobId,
   });
-  await db.insert(t.clientPrograms).values({ clientId, programId });
+  await db.insert(t.clientPrograms).values({
+    clientId, programId, enrolled: serviceDates[0] ?? now.slice(0, 10),
+  });
   await db.insert(t.clientExternalIds)
     .values({ system: "hmis", externalId: row.hmisId, clientId, linkedAt: now, linkedBy: userId })
     .onConflictDoNothing();
