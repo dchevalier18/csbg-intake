@@ -95,23 +95,38 @@ export async function buildRollup(filters?: ReportFilters): Promise<ReportRollup
   const f = filters ?? resolveFilters({}, org.fyStart);
   const fy = f.period;
   const live = f.live;
-  // Section C tallies over ALL active clients for the federal view; a chosen
-  // period (not "current") additionally narrows to clients enrolled within it.
-  const periodScoped = f.preset !== "current";
   const fields = await getEnabledIntakeFields();
 
-  let clients = (await db.select().from(t.clients)).filter((c) => c.status === "active");
+  const progScope = new Set(f.programIds);
+  // Section C counts unduplicated participants in the reporting window: a client
+  // belongs to the period when the service log shows activity inside it, OR when
+  // they enrolled inside it. Enrolling someone IS a service event, and counting
+  // only logged services reported "0 participants" next to "12 new enrollments"
+  // for a program with 157 active enrollees whose service history predates the
+  // window — a contradiction no reviewer should have to reconcile.
+  // EVERY period narrows, the current fiscal year included — a filter labelled
+  // with an FY has to mean that FY. Domain/service scope deliberately stays out
+  // of this: it reshapes Section A, not who counts as a participant.
+  const serviceRows = await db.select().from(t.serviceLog);
+  const servedInPeriod = new Set(
+    serviceRows
+      .filter((s) => s.date >= fy.start && s.date <= fy.end
+        && (progScope.size === 0 || progScope.has(s.programId)))
+      .map((s) => s.clientId));
+
+  let scoped = (await db.select().from(t.clients)).filter((c) => c.status === "active");
   if (f.programIds.length) {
-    const scope = new Set(f.programIds);
     const inScope = new Set(
-      (await db.select().from(t.clientPrograms)).filter((m) => scope.has(m.programId)).map((m) => m.clientId),
+      (await db.select().from(t.clientPrograms)).filter((m) => progScope.has(m.programId)).map((m) => m.clientId),
     );
-    clients = clients.filter((c) => inScope.has(c.id));
+    scoped = scoped.filter((c) => inScope.has(c.id));
   }
-  if (periodScoped) clients = clients.filter((c) => c.enrolled >= fy.start && c.enrolled <= fy.end);
+  const enrolledInPeriod = (c: { enrolled: string }) => c.enrolled >= fy.start && c.enrolled <= fy.end;
+  const clients = scoped.filter((c) => servedInPeriod.has(c.id) || enrolledInPeriod(c));
   const n = clients.length;
-  // New enrollments within the reporting window (live-computable either way).
-  const newInPeriod = clients.filter((c) => c.enrolled >= fy.start && c.enrolled <= fy.end).length;
+  // New enrollments in the window — an enrollment-date question, so it counts
+  // across everyone in program scope, not just those served during the period.
+  const newInPeriod = scoped.filter(enrolledInPeriod).length;
 
   // Records report-ready — % of enrolled records with every report field captured (computed live).
   const readyPct = n === 0 ? 100
@@ -208,10 +223,9 @@ export async function buildRollup(filters?: ReportFilters): Promise<ReportRollup
   // filter the baseline is dropped (it carries no date/program/service dimension).
   const allServices = await db.select().from(t.services);
   const domainOf = new Map(allServices.map((s) => [s.code, s.domain]));
-  const progScope = new Set(f.programIds);
   const domainScope = new Set(f.domains);
   const codeScope = new Set(f.serviceCodes);
-  const fyLog = (await db.select().from(t.serviceLog)).filter((s) =>
+  const fyLog = serviceRows.filter((s) =>
     s.date >= fy.start && s.date <= fy.end &&
     (progScope.size === 0 || progScope.has(s.programId)) &&
     (codeScope.size === 0 || codeScope.has(s.code)) &&
@@ -251,10 +265,16 @@ export async function buildRollup(filters?: ReportFilters): Promise<ReportRollup
   // Top-line KPIs: the pre-system baseline for the federal view; recomputed
   // live from the filtered service log when scoped (1 client record = 1 individual
   // = 1 household in this model, so served individuals and households coincide).
-  const agency = live
-    ? { individualsServed: servedIds.size, householdsServed: servedIds.size, newThisFY: newInPeriod }
+  // The federal view prefers the imported pre-system baseline, but an agency that
+  // migrated client RECORDS rather than aggregates has none on file — and falling
+  // back to the empty default reported "0 served" beside a populated Section C.
+  // No baseline on record → count live, which is the honest number either way.
+  const agencyBaseline = live ? null
     : await kvGet<{ individualsServed: number; householdsServed: number; newThisFY: number }>(
         "agency", { individualsServed: 0, householdsServed: 0, newThisFY: 0 });
+  const agency = agencyBaseline && agencyBaseline.individualsServed > 0
+    ? agencyBaseline
+    : { individualsServed: servedIds.size, householdsServed: servedIds.size, newThisFY: newInPeriod };
 
   // ---------- Section B — Individual & Family NPIs ----------
   // Counts come live from the client-level outcome log (unduplicated individuals
